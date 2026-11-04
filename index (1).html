@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0d4a2f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Shanghai Rummy</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{--felt:#0f5a38;--felt2:#0b4329;--gold:#f5c542;--ink:#1d1d1f;--red:#c8102e;--blue:#1f4fb5}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;min-height:100%;background:radial-gradient(ellipse at top,var(--felt),var(--felt2));color:#fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:17px}
+body{padding:env(safe-area-inset-top) 10px calc(env(safe-area-inset-bottom) + 10px)}
+button{font:inherit;border:0;border-radius:12px;padding:12px 16px;background:var(--gold);color:#222;font-weight:700;cursor:pointer}
+button:disabled{opacity:.4}
+button.ghost{background:rgba(255,255,255,.15);color:#fff;font-weight:600}
+button.small{padding:7px 11px;font-size:14px;border-radius:9px}
+input[type=text]{font:inherit;padding:12px;border-radius:12px;border:0;width:100%;font-size:18px}
+h1{font-size:30px;margin:18px 0 4px;text-align:center}
+.sub{opacity:.8;text-align:center;margin-bottom:18px}
+.panel{background:rgba(0,0,0,.22);border-radius:16px;padding:14px;margin:10px 0}
+.row{display:flex;gap:8px;align-items:center}
+.col{display:flex;flex-direction:column;gap:10px}
+.grow{flex:1}
+.center{text-align:center}
+.muted{opacity:.75;font-size:14px}
+.banner{background:#7a4b00;border-radius:10px;padding:8px 10px;font-size:13px;margin-top:6px}
+/* header */
+.top{display:flex;align-items:center;gap:8px;padding:6px 0}
+.top .info{flex:1;line-height:1.2}
+.top .info b{color:var(--gold)}
+/* opponents */
+.opps{display:flex;gap:6px;flex-wrap:wrap}
+.opp{flex:1;min-width:140px;background:rgba(0,0,0,.25);border-radius:12px;padding:8px 10px;border:2px solid transparent}
+.opp.turn{border-color:var(--gold)}
+.opp .nm{font-weight:700}
+.tag{display:inline-block;font-size:12px;padding:2px 7px;border-radius:20px;background:rgba(255,255,255,.18);margin-left:4px;vertical-align:middle}
+.tag.down{background:#2e8b57}
+/* piles */
+.piles{display:flex;gap:14px;align-items:center;justify-content:center;margin:10px 0}
+.pile{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:13px}
+.pile.can .card{box-shadow:0 0 0 3px var(--gold),0 0 16px var(--gold)}
+.status{background:rgba(0,0,0,.3);border-radius:12px;padding:10px 12px;text-align:center;font-weight:600}
+.status.mine{background:var(--gold);color:#222}
+.last{font-size:14px;opacity:.85;text-align:center;margin-top:6px}
+/* cards */
+.card{position:relative;background:#fff;color:var(--ink);border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,.35);user-select:none;flex:none}
+.card.red{color:var(--red)}
+.card.joker{color:#6a1b9a}
+.card .c{position:absolute;top:3px;left:5px;font-weight:800;line-height:.95;text-align:center}
+.card .m{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+.card.back{background:repeating-linear-gradient(45deg,#1f4fb5 0 6px,#2a5fd0 6px 12px);border:3px solid #fff}
+.big{width:62px;height:88px}
+.big .c{font-size:17px}.big .m{font-size:34px;padding-top:14px}
+.hand{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;padding:6px 0}
+.hand .card{width:calc((100vw - 20px - 36px)/7);max-width:72px;height:auto;aspect-ratio:5/7;transition:transform .12s}
+.hand .card .c{font-size:clamp(14px,4.4vw,20px)}
+.hand .card .m{font-size:clamp(22px,7.5vw,36px);padding-top:12px}
+.hand .card.sel{transform:translateY(-10px);box-shadow:0 0 0 3px var(--gold),0 6px 10px rgba(0,0,0,.4)}
+.hand .card.new::after{content:"NEW";position:absolute;bottom:3px;left:0;right:0;text-align:center;font-size:9px;font-weight:800;color:#0a7a3a}
+.mini{width:30px;height:42px;border-radius:5px;margin-right:-8px}
+.mini .c{font-size:12px;top:2px;left:3px}
+.mini .m{display:none}
+.mini.joker .c{font-size:11px}
+/* melds */
+.meldsec h3{margin:4px 0 6px;font-size:14px;opacity:.85;font-weight:600}
+.melds{display:flex;flex-wrap:wrap;gap:8px}
+.meld{display:flex;align-items:center;padding:6px 14px 6px 6px;border-radius:10px;background:rgba(255,255,255,.1);border:2px solid transparent}
+.meld.target{border-color:var(--gold);background:rgba(245,197,66,.18);cursor:pointer}
+.meld .lbl{font-size:11px;opacity:.7;margin-left:14px}
+/* staging */
+.stage .grp{display:flex;align-items:center;gap:8px;margin:6px 0}
+.stage .grp .cards{display:flex;flex:1}
+.ok{color:#9ff0b4;font-size:13px}.bad{color:#ffb4b4;font-size:13px}
+/* actions */
+.actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin:6px 0}
+.actions button{flex:1;min-width:110px}
+/* toast/modal */
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#222;color:#fff;padding:12px 16px;border-radius:12px;font-weight:600;opacity:0;pointer-events:none;transition:opacity .2s;max-width:90vw;text-align:center;z-index:50}
+#toast.show{opacity:1}
+#modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center;z-index:40}
+#modal[hidden]{display:none}
+#modal .sheet{background:#fff;color:#222;width:100%;max-width:560px;max-height:85vh;overflow:auto;border-radius:18px 18px 0 0;padding:18px 16px calc(env(safe-area-inset-bottom) + 18px)}
+#modal h2{margin:0 0 10px}
+#modal table{width:100%;border-collapse:collapse;font-size:15px}
+#modal td,#modal th{border-bottom:1px solid #ddd;padding:7px 4px;text-align:center}
+#modal th:first-child,#modal td:first-child{text-align:left}
+#modal .tot td{font-weight:800;border-top:2px solid #222}
+#modal ul{padding-left:20px;line-height:1.45}
+#modal button.ghost{background:#eee;color:#222}
+.logl{font-size:14px;border-bottom:1px solid #eee;padding:6px 0}
+.result .who{font-weight:700;margin-top:10px}
+.result .cards{display:flex;flex-wrap:wrap;padding:4px 8px 4px 0}
+.winner{font-size:22px;font-weight:800;text-align:center;margin:6px 0 12px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="toast"></div>
+<div id="modal" hidden></div>
+<script>
+/* =========================================================
+   SETUP: paste your Supabase project URL and anon (public) key.
+   Leave blank to run in demo mode (two tabs on one device).
+   ========================================================= */
+const CONFIG = {
+  SUPABASE_URL: "https://kkfnhytkojvdvyayhsxj.supabase.co",
+  SUPABASE_ANON_KEY: "sb_publishable_G_jk3EUPRAMZHbgj7jRpWQ_WaKaBWFH"
+};
+
+/* ======================= RULES ======================= */
+const SUITS = ["S","H","C","D"];
+const RANKS = ["A","2","3","4","5","6","7","8","9","T","J","Q","K"];
+const RV = {A:1,"2":2,"3":3,"4":4,"5":5,"6":6,"7":7,"8":8,"9":9,T:10,J:11,Q:12,K:13};
+const SYM = {S:"♠",H:"♥",D:"♦",C:"♣"};
+const CONTRACTS = [
+  {s:2,r:0,n:10},{s:1,r:1,n:11},{s:0,r:2,n:12},{s:3,r:0,n:13},
+  {s:2,r:1,n:14},{s:1,r:2,n:15},{s:0,r:3,n:16}
+];
+const ROUNDS = CONTRACTS.length;
+
+function contractText(r){
+  const k = CONTRACTS[r], p = [];
+  if (k.s) p.push(k.s + (k.s>1?" sets":" set") + " of 3");
+  if (k.r) p.push(k.r + (k.r>1?" runs":" run") + " of 4");
+  return p.join(" + ");
+}
+const isJoker = c => c[0]==="W";
+const isWild = (c,S) => isJoker(c) || (S.twosWild && c[0]==="2");
+const rankLabel = c => isJoker(c) ? "★" : (c[0]==="T" ? "10" : c[0]);
+const cardName = c => isJoker(c) ? "Joker" : rankLabel(c) + SYM[c[1]];
+const valLabel = v => v===1||v===14 ? "A" : v===11?"J":v===12?"Q":v===13?"K":String(v);
+function points(c,S){
+  if (isJoker(c)) return 50;
+  if (S.twosWild && c[0]==="2") return 20;
+  if (c[0]==="A") return 15;
+  if ("TJQK".includes(c[0])) return 10;
+  return 5;
+}
+function rnd(n){ const a = new Uint32Array(1); crypto.getRandomValues(a); return a[0] % n; }
+function shuffle(a){ for (let i=a.length-1;i>0;i--){ const j=rnd(i+1); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+function newDeck(){
+  const d = [];
+  for (let k=0;k<2;k++) for (const s of SUITS) for (const r of RANKS) d.push(r+s+k);
+  for (let j=0;j<4;j++) d.push("WJ"+j);
+  return shuffle(d);
+}
+
+function analyzeSet(cards,S){
+  if (cards.length < 3) return null;
+  let nat = cards.filter(c=>!isWild(c,S));
+  if (!nat.length) { nat = cards.filter(c=>c[0]==="2"); if (!nat.length) return null; }
+  const r = nat[0][0];
+  if (!nat.every(c=>c[0]===r)) return null;
+  const ordered = [...nat, ...cards.filter(c=>!nat.includes(c))];
+  return {type:"set", rank:r, cards:ordered};
+}
+function layoutRun(nat, wild){
+  if (!nat.length) return null;
+  const s = nat[0][1];
+  if (!nat.every(c=>c[1]===s)) return null;
+  const hasAce = nat.some(c=>c[0]==="A");
+  for (const aceHigh of (hasAce ? [false,true] : [false])) {
+    const vals = nat.map(c => c[0]==="A" ? (aceHigh?14:1) : RV[c[0]]);
+    if (new Set(vals).size !== vals.length) continue;
+    const mn = Math.min(...vals), mx = Math.max(...vals);
+    const gaps = (mx-mn+1) - nat.length;
+    if (gaps > wild.length) continue;
+    let extra = wild.length - gaps, lo = mn, hi = mx;
+    while (extra>0 && hi<14) { hi++; extra--; }
+    while (extra>0 && lo>1) { lo--; extra--; }
+    if (extra>0) continue;
+    const byVal = {}; nat.forEach((c,i)=>byVal[vals[i]]=c);
+    const w = [...wild], ordered = [];
+    for (let v=lo; v<=hi; v++) ordered.push(byVal[v] ?? w.shift());
+    return {type:"run", suit:s, low:lo, high:hi, cards:ordered};
+  }
+  return null;
+}
+function analyzeRun(cards,S){
+  if (cards.length < 4) return null;
+  const jokers = cards.filter(isJoker);
+  const others = cards.filter(c=>!isJoker(c));
+  const twos = S.twosWild ? others.filter(c=>c[0]==="2") : [];
+  const plain = others.filter(c=>!twos.includes(c));
+  const options = twos.map(t=>({nat:[...plain,t], wild:[...jokers,...twos.filter(x=>x!==t)]}));
+  options.push({nat:plain, wild:[...jokers,...twos]});
+  for (const o of options) { const L = layoutRun(o.nat,o.wild); if (L) return L; }
+  return null;
+}
+function checkContract(groups, k, S){
+  const need = k.s + k.r;
+  if (groups.length !== need) return {ok:false, msg:`This round needs exactly ${need} groups: ${contractText(CONTRACTS.indexOf(k))}`};
+  const opts = groups.map(g=>({set:analyzeSet(g,S), run:analyzeRun(g,S)}));
+  const bad = opts.findIndex(o=>!o.set && !o.run);
+  if (bad>=0) return {ok:false, msg:`Group ${bad+1} isn't a valid set (3+ same rank) or run (4+ in a row, same suit)`};
+  function rec(i,s,r,acc){
+    if (i===groups.length) return (s===0 && r===0) ? acc : null;
+    const o = opts[i];
+    if (o.set && s>0) { const x = rec(i+1,s-1,r,[...acc,o.set]); if (x) return x; }
+    if (o.run && r>0) { const x = rec(i+1,s,r-1,[...acc,o.run]); if (x) return x; }
+    return null;
+  }
+  const melds = rec(0,k.s,k.r,[]);
+  if (!melds) return {ok:false, msg:`Your groups don't match the contract: ${contractText(CONTRACTS.indexOf(k))}`};
+  return {ok:true, melds};
+}
+// Returns updated meld fields, or null if the card doesn't fit.
+function fitCard(m, c, S){
+  if (m.type==="set") {
+    if (isWild(c,S) || c[0]===m.rank) return {cards:[...m.cards, c]};
+    return null;
+  }
+  if (!isJoker(c) && c[1]===m.suit) {
+    const lowV = c[0]==="A" ? 1 : RV[c[0]];
+    const highV = c[0]==="A" ? 14 : RV[c[0]];
+    if (lowV === m.low-1) return {low:m.low-1, cards:[c, ...m.cards]};
+    if (highV === m.high+1) return {high:m.high+1, cards:[...m.cards, c]};
+  }
+  if (isWild(c,S)) {
+    if (m.high < 14) return {high:m.high+1, cards:[...m.cards, c]};
+    if (m.low > 1) return {low:m.low-1, cards:[c, ...m.cards]};
+  }
+  return null;
+}
+function meldLabel(m){
+  if (m.type==="set") return "Set of " + (m.rank==="T"?"10":m.rank) + "s";
+  return valLabel(m.low) + "–" + valLabel(m.high) + " " + SYM[m.suit];
+}
+
+/* ======================= GAME ACTIONS (pure) ======================= */
+function need(cond,msg){ if (!cond) throw new Error(msg); }
+const pidx = (s,pid) => s.players.findIndex(p=>p.id===pid);
+const pname = (s,pid) => (s.players.find(p=>p.id===pid)||{}).name || "?";
+function addLog(s,m){ s.log.push({t:Date.now(), m}); if (s.log.length>60) s.log.splice(0, s.log.length-60); }
+function myTurn(s,pid,phase){
+  need(s.status==="playing", "The round isn't in progress");
+  need(s.players[s.turn].id===pid, "It's not your turn yet");
+  if (phase) need(s.phase===phase, phase==="draw" ? "You already drew a card — now play or discard" : "Draw a card first");
+}
+function takeFromHand(s,pid,cards){
+  const h = s.hands[pid];
+  for (const c of cards) { const i = h.indexOf(c); need(i>=0, "That card isn't in your hand"); h.splice(i,1); }
+}
+function newState(pid,name){
+  return {status:"lobby", players:[{id:pid,name}], hostId:pid, settings:{twosWild:false},
+          round:0, scores:{}, log:[], created:Date.now()};
+}
+function deal(s,r){
+  const n = s.players.length;
+  s.round = r; s.dealer = (r + n - 1) % n;
+  const deck = newDeck(), k = CONTRACTS[r].n;
+  s.hands = {};
+  for (const p of s.players) s.hands[p.id] = deck.splice(0,k);
+  s.discard = [deck.pop()]; s.stock = deck;
+  s.down = {}; s.melds = []; s.nextMeld = 1;
+  s.turn = (s.dealer + 1) % n; s.phase = "draw"; s.drawn = null;
+  s.status = "playing"; s.result = null;
+  addLog(s, `Round ${r+1} dealt — ${contractText(r)}. ${s.players[s.turn].name} goes first.`);
+}
+function endRound(s,winner){
+  const res = {winner, pts:{}, hands:{}};
+  for (const p of s.players) {
+    const h = s.hands[p.id];
+    res.hands[p.id] = [...h];
+    res.pts[p.id] = h.reduce((a,c)=>a+points(c,s.settings),0);
+    s.scores[p.id].push(res.pts[p.id]);
+  }
+  s.result = res; s.status = "roundOver";
+  addLog(s, `${pname(s,winner)} went out and won round ${s.round+1}!`);
+}
+function checkOut(s,pid){ if (!s.hands[pid].length) endRound(s,pid); }
+
+const Actions = {
+  join(s,pid,name){
+    const i = pidx(s,pid);
+    if (i>=0) { s.players[i].name = name; return s; }
+    need(s.status==="lobby", "This game has already started");
+    need(s.players.length<4, "This game is full");
+    s.players.push({id:pid,name}); addLog(s, `${name} joined`);
+    return s;
+  },
+  setTwos(s,pid,on){ need(s.status==="lobby" && s.hostId===pid, "Only the host can change settings"); s.settings.twosWild = !!on; return s; },
+  start(s,pid){
+    if (s.status!=="lobby") return null;
+    need(s.players.length>=2, "Waiting for at least one more player");
+    s.scores = {}; s.players.forEach(p=>s.scores[p.id]=[]);
+    deal(s,0); return s;
+  },
+  drawStock(s,pid){
+    myTurn(s,pid,"draw");
+    if (!s.stock.length) {
+      const top = s.discard.pop(); s.stock = shuffle(s.discard); s.discard = top ? [top] : [];
+      addLog(s, "The deck ran out — discards were reshuffled");
+    }
+    need(s.stock.length, "No cards left to draw");
+    const c = s.stock.pop(); s.hands[pid].push(c);
+    s.phase = "play"; s.drawn = {pid, c, from:"stock"};
+    addLog(s, `${pname(s,pid)} drew from the deck`);
+    return s;
+  },
+  drawDiscard(s,pid){
+    myTurn(s,pid,"draw");
+    need(s.discard.length, "The discard pile is empty");
+    const c = s.discard.pop(); s.hands[pid].push(c);
+    s.phase = "play"; s.drawn = {pid, c, from:"discard"};
+    addLog(s, `${pname(s,pid)} picked up ${cardName(c)} from the discard pile`);
+    return s;
+  },
+  layDown(s,pid,groups){
+    myTurn(s,pid,"play");
+    need(!s.down[pid], "You've already laid down this round");
+    const flat = groups.flat();
+    need(new Set(flat).size===flat.length, "A card is in two groups");
+    flat.forEach(c=>need(s.hands[pid].includes(c), "That card isn't in your hand"));
+    const res = checkContract(groups, CONTRACTS[s.round], s.settings);
+    need(res.ok, res.msg);
+    takeFromHand(s,pid,flat);
+    for (const m of res.melds) { m.id = s.nextMeld++; m.owner = pid; s.melds.push(m); }
+    s.down[pid] = true;
+    addLog(s, `${pname(s,pid)} laid down: ${res.melds.map(meldLabel).join(", ")}`);
+    checkOut(s,pid); return s;
+  },
+  layOff(s,pid,cards,meldId){
+    myTurn(s,pid,"play");
+    need(s.down[pid], "Lay down your contract before adding to melds");
+    const m = s.melds.find(x=>x.id===meldId); need(m, "That meld is gone");
+    cards.forEach(c=>need(s.hands[pid].includes(c), "That card isn't in your hand"));
+    let left = [...cards], placed = [], progress = true;
+    while (left.length && progress) {
+      progress = false;
+      for (const c of left) {
+        const f = fitCard(m,c,s.settings);
+        if (f) { Object.assign(m,f); placed.push(c); left = left.filter(x=>x!==c); progress = true; break; }
+      }
+    }
+    need(placed.length, (cards.length===1 ? cardName(cards[0]) + " doesn't" : "Those cards don't") + " fit on " + meldLabel(m));
+    takeFromHand(s,pid,placed);
+    addLog(s, `${pname(s,pid)} added ${placed.map(cardName).join(", ")} to ${pname(s,m.owner)}'s ${meldLabel(m)}`);
+    s._leftover = left;
+    checkOut(s,pid); return s;
+  },
+  discard(s,pid,c){
+    myTurn(s,pid,"play");
+    takeFromHand(s,pid,[c]);
+    s.discard.push(c);
+    addLog(s, `${pname(s,pid)} discarded ${cardName(c)}`);
+    if (!s.hands[pid].length) { endRound(s,pid); return s; }
+    s.turn = (s.turn+1) % s.players.length; s.phase = "draw"; s.drawn = null;
+    return s;
+  },
+  nextRound(s,pid,fromRound){
+    if (s.status!=="roundOver" || s.round!==fromRound) return null;
+    if (s.round >= ROUNDS-1) { s.status = "gameOver"; addLog(s,"Game over!"); }
+    else deal(s, s.round+1);
+    return s;
+  },
+  rematch(s,pid,created){
+    if (s.status!=="gameOver" || s.created!==created) return null;
+    s.scores = {}; s.players.forEach(p=>s.scores[p.id]=[]);
+    s.created = Date.now(); s.log = [];
+    addLog(s, "New game started"); deal(s,0); return s;
+  }
+};
+
+/* ======================= BACKENDS ======================= */
+const ONLINE = !!(CONFIG.SUPABASE_URL && CONFIG.SUPABASE_ANON_KEY && window.supabase);
+const TABLE = "rummy_games";
+
+class LocalBackend {
+  constructor(code){ this.key = "sr_local_" + code; }
+  async get(){ const raw = localStorage.getItem(this.key); return raw ? JSON.parse(raw) : null; }
+  async create(state){ if (localStorage.getItem(this.key)) return false; localStorage.setItem(this.key, JSON.stringify({state, version:0})); return true; }
+  async write(state, version){
+    const cur = await this.get(); if (!cur || cur.version!==version) return false;
+    localStorage.setItem(this.key, JSON.stringify({state, version:version+1})); return true;
+  }
+  subscribe(cb){ window.addEventListener("storage", e=>{ if (e.key===this.key && e.newValue) cb(JSON.parse(e.newValue)); }); }
+}
+class SupaBackend {
+  constructor(code){ this.code = code; this.sb = SupaBackend.client ||= window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY); }
+  async get(){
+    const {data,error} = await this.sb.from(TABLE).select("state,version").eq("code",this.code).maybeSingle();
+    if (error) throw new Error("Connection problem: " + error.message);
+    return data;
+  }
+  async create(state){
+    const {error} = await this.sb.from(TABLE).insert({code:this.code, state, version:0});
+    if (error) { if (error.code==="23505") return false; throw new Error("Couldn't create game: " + error.message); }
+    return true;
+  }
+  async write(state, version){
+    const {data,error} = await this.sb.from(TABLE)
+      .update({state, version:version+1, updated_at:new Date().toISOString()})
+      .eq("code",this.code).eq("version",version).select("version");
+    if (error) throw new Error("Couldn't save: " + error.message);
+    return data && data.length>0;
+  }
+  subscribe(cb){
+    this.sb.channel("game-"+this.code)
+      .on("postgres_changes", {event:"UPDATE", schema:"public", table:TABLE, filter:"code=eq."+this.code}, p=>{ if (p.new && p.new.state) cb({state:p.new.state, version:p.new.version}); })
+      .subscribe();
+  }
+}
+const makeBackend = code => ONLINE ? new SupaBackend(code) : new LocalBackend(code);
+
+/* ======================= APP STATE ======================= */
+const store = ONLINE ? localStorage : sessionStorage; // demo mode: each tab is its own player
+const G = { code:null, pid:null, state:null, version:-1, be:null, sel:new Set(), staged:[], sort:localStorage.getItem("sr_sort")||"suit", busy:false, wasMyTurn:false };
+function myId(){
+  let id = store.getItem("sr_pid");
+  if (!id) { id = Math.random().toString(36).slice(2,10); store.setItem("sr_pid", id); }
+  return id;
+}
+function gameCode(){ const A="ABCDEFGHJKMNPQRSTUVWXYZ23456789"; let c=""; for (let i=0;i<5;i++) c+=A[rnd(A.length)]; return c; }
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
+function toast(msg){ const t=$("#toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(toast.h); toast.h=setTimeout(()=>t.classList.remove("show"), 2800); }
+
+function applyRemote(row){
+  if (!row || row.version < G.version) return;
+  if (row.version === G.version && G.state) return;
+  G.state = row.state; G.version = row.version;
+  const s = G.state;
+  if (s.hands && s.hands[G.pid]) {
+    const h = new Set(s.hands[G.pid]);
+    G.sel = new Set([...G.sel].filter(c=>h.has(c)));
+    G.staged = G.staged.map(g=>g.filter(c=>h.has(c))).filter(g=>g.length);
+    if (s.down && s.down[G.pid]) G.staged = [];
+  }
+  const mine = s.status==="playing" && s.players[s.turn] && s.players[s.turn].id===G.pid;
+  if (mine && !G.wasMyTurn && G.version>0) alertTurn();
+  G.wasMyTurn = mine;
+  document.title = mine ? "🔔 Your turn — Shanghai Rummy" : "Shanghai Rummy";
+  render();
+}
+let audioCtx;
+function alertTurn(){
+  try { navigator.vibrate && navigator.vibrate([150,80,150]); } catch(e){}
+  try {
+    audioCtx ||= new (window.AudioContext||window.webkitAudioContext)();
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.frequency.value = 880; g.gain.setValueAtTime(.15, audioCtx.currentTime); g.gain.exponentialRampToValueAtTime(.001, audioCtx.currentTime+.4);
+    o.connect(g).connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime+.4);
+  } catch(e){}
+}
+async function refresh(){ if (!G.be) return; try { applyRemote(await G.be.get()); } catch(e){} }
+
+async function act(name, ...args){
+  if (G.busy) return; G.busy = true;
+  try {
+    for (let tries=0; tries<6; tries++) {
+      const cur = await G.be.get();
+      let ns;
+      try { ns = Actions[name](structuredClone(cur.state), G.pid, ...args); }
+      catch(e){ applyRemote(cur); toast(e.message); return false; }
+      if (!ns) { applyRemote(cur); return false; }
+      const leftover = ns._leftover; delete ns._leftover;
+      if (await G.be.write(ns, cur.version)) {
+        applyRemote({state:ns, version:cur.version+1});
+        if (leftover && leftover.length) toast(leftover.map(cardName).join(", ") + " didn't fit");
+        return true;
+      }
+    }
+    toast("Someone else moved at the same time — try again");
+  } catch(e){ toast(e.message); }
+  finally { G.busy = false; render(); }
+  return false;
+}
+
+/* ======================= RENDERING ======================= */
+function cardHTML(c, cls="big", extra=""){
+  if (c==="back") return `<div class="card back ${cls}"></div>`;
+  if (isJoker(c)) return `<div class="card joker ${cls} ${extra}" data-c="${c}"><div class="c">★<br><span style="font-size:.6em">JKR</span></div><div class="m">🃏</div></div>`;
+  const red = c[1]==="H"||c[1]==="D";
+  return `<div class="card ${red?"red":""} ${cls} ${extra}" data-c="${c}"><div class="c">${rankLabel(c)}<br>${SYM[c[1]]}</div><div class="m">${SYM[c[1]]}</div></div>`;
+}
+function sortHand(h){
+  const so = {S:0,H:1,C:2,D:3};
+  const wildLast = c => isWild(c, G.state.settings) ? 1 : 0;
+  return [...h].sort((a,b)=>{
+    const w = wildLast(a)-wildLast(b); if (w) return w;
+    if (isJoker(a)||isJoker(b)) return isJoker(a)-isJoker(b);
+    if (G.sort==="suit") return so[a[1]]-so[b[1]] || RV[a[0]]-RV[b[0]];
+    return RV[a[0]]-RV[b[0]] || so[a[1]]-so[b[1]];
+  });
+}
+function shareURL(){ const u = new URL(location.href); u.search = "?g=" + G.code; u.hash = ""; return u.toString(); }
+
+function render(){
+  const app = $("#app");
+  if (!G.code) return renderHome(app);
+  const s = G.state;
+  if (!s) { app.innerHTML = `<h1>Shanghai Rummy</h1><div class="panel center">Loading game ${esc(G.code)}…</div>`; return; }
+  if (pidx(s,G.pid) < 0) return renderJoin(app,s);
+  if (s.status==="lobby") return renderLobby(app,s);
+  renderGame(app,s);
+  if (s.status==="roundOver" || s.status==="gameOver") showResult(s); else if (G.modalKind==="result") closeModal();
+}
+
+function renderHome(app){
+  const nm = localStorage.getItem("sr_name") || "";
+  app.innerHTML = `
+    <h1>🃏 Shanghai Rummy</h1>
+    <div class="sub">Play together from your own phones</div>
+    ${ONLINE ? "" : `<div class="banner">Demo mode: online play isn't set up yet, so this only works between tabs on this device.</div>`}
+    <div class="panel col">
+      <label>Your name</label>
+      <input type="text" id="nm" maxlength="16" value="${esc(nm)}" placeholder="e.g. Mom">
+      <button id="newg">Start a new game</button>
+    </div>
+    <div class="panel col">
+      <label>Have a game code?</label>
+      <div class="row"><input type="text" id="code" maxlength="5" placeholder="ABCDE" style="text-transform:uppercase"><button id="go">Join</button></div>
+    </div>
+    <div class="center"><button class="ghost small" id="rules">How to play</button></div>`;
+  $("#newg").onclick = async ()=>{
+    const name = $("#nm").value.trim(); if (!name) return toast("Type your name first");
+    localStorage.setItem("sr_name", name);
+    try {
+      for (let i=0;i<5;i++) {
+        const code = gameCode(), be = makeBackend(code);
+        if (await be.create(newState(G.pid,name))) { history.replaceState(null,"","?g="+code); return openGame(code); }
+      }
+      toast("Couldn't create a game — try again");
+    } catch(e){ toast(e.message); }
+  };
+  $("#go").onclick = ()=>{ const c = $("#code").value.trim().toUpperCase(); if (c.length<4) return toast("Enter the game code"); history.replaceState(null,"","?g="+c); openGame(c); };
+  $("#rules").onclick = showRules;
+}
+
+function renderJoin(app,s){
+  const nm = localStorage.getItem("sr_name") || "";
+  if (s.status!=="lobby") {
+    app.innerHTML = `<h1>Shanghai Rummy</h1><div class="panel col">
+      <div>This game is already going. Which player are you?</div>
+      ${s.players.map(p=>`<button class="ghost" data-claim="${esc(p.id)}">I'm ${esc(p.name)}</button>`).join("")}
+      <div class="muted">Use this if you switched phones or browsers.</div></div>`;
+    app.querySelectorAll("[data-claim]").forEach(b=>b.onclick=()=>{ G.pid=b.dataset.claim; store.setItem("sr_pid",G.pid); G.version=-1; refresh(); });
+    return;
+  }
+  app.innerHTML = `<h1>🃏 Shanghai Rummy</h1>
+    <div class="sub">${esc(s.players.map(p=>p.name).join(" & "))} invited you to play</div>
+    <div class="panel col">
+      <label>Your name</label>
+      <input type="text" id="nm" maxlength="16" value="${esc(nm)}" placeholder="e.g. Aunt Linda">
+      <button id="join">Join game</button>
+    </div>`;
+  $("#join").onclick = ()=>{ const name=$("#nm").value.trim(); if(!name) return toast("Type your name first"); localStorage.setItem("sr_name",name); act("join",name); };
+}
+
+function renderLobby(app,s){
+  const host = s.hostId===G.pid;
+  app.innerHTML = `<h1>🃏 Shanghai Rummy</h1>
+    <div class="panel col center">
+      <div class="muted">Game code</div>
+      <div style="font-size:34px;font-weight:800;letter-spacing:4px">${esc(G.code)}</div>
+      <button id="share">📲 Send the link</button>
+      <div class="muted" style="word-break:break-all">${esc(shareURL())}</div>
+    </div>
+    <div class="panel">
+      <b>Players</b>
+      ${s.players.map(p=>`<div style="padding:6px 0">• ${esc(p.name)}${p.id===s.hostId?' <span class="tag">host</span>':''}${p.id===G.pid?' <span class="tag">you</span>':''}</div>`).join("")}
+      ${s.players.length<2?'<div class="muted">Waiting for someone to open the link…</div>':''}
+    </div>
+    <div class="panel">
+      <label class="row"><input type="checkbox" id="twos" ${s.settings.twosWild?"checked":""} ${host?"":"disabled"} style="width:22px;height:22px"> <span>2s are wild too (jokers are always wild)</span></label>
+    </div>
+    ${host ? `<button id="start" style="width:100%" ${s.players.length<2?"disabled":""}>Deal the cards</button>` : `<div class="status">Waiting for ${esc(pname(s,s.hostId))} to deal…</div>`}
+    <div class="center" style="margin-top:12px"><button class="ghost small" id="rules">How to play</button></div>`;
+  $("#share").onclick = async ()=>{
+    const url = shareURL();
+    if (navigator.share) { try { await navigator.share({title:"Shanghai Rummy", text:"Come play Shanghai Rummy with me!", url}); return; } catch(e){ if (e.name==="AbortError") return; } }
+    try { await navigator.clipboard.writeText(url); toast("Link copied — paste it in a text"); } catch(e){ toast("Copy the link shown below"); }
+  };
+  const tw = $("#twos"); if (host) tw.onchange = ()=>act("setTwos", tw.checked);
+  if (host) $("#start").onclick = ()=>act("start");
+  $("#rules").onclick = showRules;
+}
+
+function renderGame(app,s){
+  const me = G.pid, S = s.settings;
+  const turnPid = s.players[s.turn].id, mine = s.status==="playing" && turnPid===me;
+  const down = !!s.down[me];
+  const hand = s.hands[me] || [];
+  const stagedSet = new Set(G.staged.flat());
+  const shown = sortHand(hand.filter(c=>!stagedSet.has(c)));
+  const total = pid => (s.scores[pid]||[]).reduce((a,b)=>a+b,0);
+  const canDraw = mine && s.phase==="draw";
+  const canLayOff = mine && s.phase==="play" && down && G.sel.size>0;
+  const k = CONTRACTS[s.round];
+
+  let status;
+  if (s.status!=="playing") status = `Round over — <button class="small" id="showres">Show results</button>`;
+  else if (!mine) status = `Waiting for ${esc(pname(s,turnPid))}…`;
+  else if (s.phase==="draw") status = "Your turn! Tap the deck or the discard pile to draw.";
+  else if (!down) status = "Make your groups and lay down if you can — then discard one card.";
+  else status = "Add cards to any meld (select, then tap the meld) — then discard.";
+
+  const lastOther = [...s.log].reverse().find(l=>!l.m.startsWith(pname(s,me)+" ")) ;
+
+  const opps = s.players.filter(p=>p.id!==me).map(p=>`
+    <div class="opp ${p.id===turnPid&&s.status==="playing"?"turn":""}">
+      <div class="nm">${esc(p.name)} ${s.down[p.id]?'<span class="tag down">down ✓</span>':''}</div>
+      <div class="muted">${(s.hands[p.id]||[]).length} cards · ${total(p.id)} pts</div>
+    </div>`).join("");
+
+  const owners = s.players.filter(p=>s.melds.some(m=>m.owner===p.id));
+  const melds = owners.length ? owners.map(p=>`
+    <div class="meldsec"><h3>${p.id===me?"Your melds":esc(p.name)+"'s melds"}</h3>
+      <div class="melds">${s.melds.filter(m=>m.owner===p.id).map(m=>`
+        <div class="meld ${canLayOff?"target":""}" data-meld="${m.id}">
+          ${m.cards.map(c=>cardHTML(c,"mini")).join("")}<span class="lbl">${esc(meldLabel(m))}</span>
+        </div>`).join("")}</div></div>`).join("")
+    : `<div class="muted center">No one has laid down yet. This round: <b>${contractText(s.round)}</b></div>`;
+
+  let stage = "";
+  if (!down && G.staged.length) {
+    const res = G.staged.length===k.s+k.r ? checkContract(G.staged,k,S) : null;
+    stage = `<div class="panel stage"><b>Your groups</b> <span class="muted">(${G.staged.length} of ${k.s+k.r})</span>
+      ${G.staged.map((g,i)=>{ const st=analyzeSet(g,S), rn=analyzeRun(g,S);
+        const ok = st||rn ? `<span class="ok">${[st?"set":null,rn?"run":null].filter(Boolean).join(" / ")} ✓</span>` : `<span class="bad">not valid</span>`;
+        return `<div class="grp"><div class="cards">${g.map(c=>cardHTML(c,"mini")).join("")}</div>${ok}<button class="ghost small" data-unstage="${i}">✕</button></div>`; }).join("")}
+      ${res && !res.ok ? `<div class="bad">${esc(res.msg)}</div>`:""}
+      <div class="actions"><button id="laydown" ${res&&res.ok&&mine&&s.phase==="play"?"":"disabled"}>Lay down</button><button class="ghost" id="clearstage">Put back</button></div>
+    </div>`;
+  }
+
+  const buttons = [];
+  if (mine && s.phase==="play") {
+    if (!down) buttons.push(`<button class="ghost" id="group" ${G.sel.size>=3?"":"disabled"}>Make group (${G.sel.size})</button>`);
+    buttons.push(`<button id="disc" ${G.sel.size===1?"":"disabled"}>Discard${G.sel.size===1?" "+cardName([...G.sel][0]):""}</button>`);
+  }
+
+  app.innerHTML = `
+    <div class="top">
+      <div class="info">Round ${s.round+1} of ${ROUNDS}<br><b>${contractText(s.round)}</b></div>
+      <button class="ghost small" id="scores">Scores</button>
+      <button class="ghost small" id="logb">Log</button>
+      <button class="ghost small" id="rules">?</button>
+    </div>
+    ${ONLINE?"":`<div class="banner">Demo mode (this device only)</div>`}
+    <div class="opps">${opps}</div>
+    <div class="piles">
+      <div class="pile ${canDraw?"can":""}" id="stock">${cardHTML("back","big")}<div>Deck (${s.stock.length})</div></div>
+      <div class="pile ${canDraw&&s.discard.length?"can":""}" id="dpile">${s.discard.length?cardHTML(s.discard[s.discard.length-1],"big"):'<div class="card big" style="opacity:.25"></div>'}<div>Discard</div></div>
+    </div>
+    <div class="status ${mine?"mine":""}">${status}</div>
+    ${!mine && lastOther ? `<div class="last">Last: ${esc(lastOther.m)}</div>`:""}
+    <div class="panel">${melds}</div>
+    ${stage}
+    <div class="row" style="justify-content:space-between;margin-top:6px">
+      <b>Your hand (${hand.length})</b>
+      <div class="row">
+        ${G.sel.size?`<button class="ghost small" id="desel">Unselect</button>`:""}
+        <button class="ghost small" id="sort">Sort: ${G.sort==="suit"?"suit":"number"}</button>
+      </div>
+    </div>
+    <div class="hand">${shown.map(c=>cardHTML(c,"",(G.sel.has(c)?"sel ":"")+(s.drawn&&s.drawn.pid===me&&s.drawn.c===c&&mine?"new":""))).join("")}</div>
+    ${buttons.length?`<div class="actions">${buttons.join("")}</div>`:""}
+    ${mine&&s.phase==="play"&&down&&!G.sel.size?`<div class="muted center">Tip: select a card, then tap a meld to add it.</div>`:""}
+  `;
+
+  app.querySelectorAll(".hand .card").forEach(el=>el.onclick=()=>{
+    const c = el.dataset.c; G.sel.has(c) ? G.sel.delete(c) : G.sel.add(c); render();
+  });
+  $("#sort").onclick = ()=>{ G.sort = G.sort==="suit"?"rank":"suit"; localStorage.setItem("sr_sort",G.sort); render(); };
+  const ds = $("#desel"); if (ds) ds.onclick = ()=>{ G.sel.clear(); render(); };
+  $("#stock").onclick = ()=>{ if (canDraw) act("drawStock"); else if (mine) toast("You already drew this turn"); };
+  $("#dpile").onclick = ()=>{ if (canDraw) act("drawDiscard"); else if (mine) toast("You already drew this turn"); };
+  const sr = $("#showres"); if (sr) sr.onclick = ()=>{ G.peeking = null; render(); };
+  $("#scores").onclick = ()=>showScores(s);
+  $("#logb").onclick = ()=>showLog(s);
+  $("#rules").onclick = showRules;
+  const gb = $("#group"); if (gb) gb.onclick = ()=>{ G.staged.push(sortHand([...G.sel])); G.sel.clear(); render(); };
+  const db = $("#disc"); if (db) db.onclick = async ()=>{ const c=[...G.sel][0]; if (await act("discard",c)) G.sel.delete(c); };
+  app.querySelectorAll("[data-unstage]").forEach(b=>b.onclick=()=>{ G.staged.splice(+b.dataset.unstage,1); render(); });
+  const cs = $("#clearstage"); if (cs) cs.onclick = ()=>{ G.staged=[]; render(); };
+  const ld = $("#laydown"); if (ld) ld.onclick = async ()=>{ if (await act("layDown", G.staged)) G.staged=[]; };
+  app.querySelectorAll("[data-meld]").forEach(el=>el.onclick=async ()=>{
+    if (!canLayOff) { if (mine && s.phase==="play" && !down) toast("Lay down your contract first"); else if (mine && s.phase==="play") toast("Select a card from your hand first"); return; }
+    const cards = [...G.sel];
+    if (await act("layOff", cards, +el.dataset.meld)) { G.sel.clear(); render(); }
+  });
+}
+
+/* ======================= MODALS ======================= */
+function openModal(html, kind){ const m=$("#modal"); m.innerHTML=`<div class="sheet">${html}</div>`; m.hidden=false; G.modalKind=kind; m.onclick=e=>{ if(e.target===m && kind!=="result") closeModal(); }; m.querySelectorAll("[data-close]").forEach(b=>b.onclick=closeModal); }
+function closeModal(){ const m=$("#modal"); m.hidden=true; m.innerHTML=""; G.modalKind=null; }
+function scoreTable(s){
+  const rows = [];
+  for (let r=0; r<ROUNDS; r++) {
+    if (!s.players.some(p=>(s.scores[p.id]||[])[r]!==undefined)) continue;
+    rows.push(`<tr><td>${r+1}. ${contractText(r)}</td>${s.players.map(p=>`<td>${s.scores[p.id][r]}</td>`).join("")}</tr>`);
+  }
+  return `<table><tr><th>Round</th>${s.players.map(p=>`<th>${esc(p.name)}</th>`).join("")}</tr>${rows.join("")}
+    <tr class="tot"><td>Total</td>${s.players.map(p=>`<td>${(s.scores[p.id]||[]).reduce((a,b)=>a+b,0)}</td>`).join("")}</tr></table>
+    <p style="font-size:13px;color:#666">Lowest total wins.</p>`;
+}
+function showScores(s){ openModal(`<h2>Scores</h2>${scoreTable(s)}<button class="ghost" data-close style="width:100%">Close</button>`,"scores"); }
+function showLog(s){ openModal(`<h2>What happened</h2>${[...s.log].reverse().map(l=>`<div class="logl">${esc(l.m)}</div>`).join("")}<br><button class="ghost" data-close style="width:100%">Close</button>`,"log"); }
+function showResult(s){
+  const r = s.result; if (!r) return;
+  const over = s.status==="gameOver";
+  let head;
+  if (over) {
+    const tot = s.players.map(p=>({p, t:s.scores[p.id].reduce((a,b)=>a+b,0)})).sort((a,b)=>a.t-b.t);
+    const tie = tot.length>1 && tot[0].t===tot[1].t;
+    head = `<div class="winner">🏆 ${tie?"It's a tie!":esc(tot[0].p.name)+" wins the game!"}</div>`;
+  } else head = `<div class="winner">${esc(pname(s,r.winner))} went out! 🎉</div>`;
+  const hands = s.players.filter(p=>p.id!==r.winner).map(p=>`
+    <div class="result"><div class="who">${esc(p.name)}: +${r.pts[p.id]} pts</div>
+    <div class="cards">${r.hands[p.id].map(c=>cardHTML(c,"mini")).join("")}</div></div>`).join("");
+  const btn = over
+    ? `<button id="again" style="width:100%">Play again</button>`
+    : `<button id="next" style="width:100%">Deal round ${s.round+2}: ${contractText(s.round+1)}</button>`;
+  openModal(`<h2>${over?"Game over":"Round "+(s.round+1)+" finished"}</h2>${head}${hands}<h3>Scores</h3>${scoreTable(s)}${btn}
+    <button class="ghost" id="peek" style="width:100%;margin-top:8px">Look at the table</button>`, "result");
+  const n = $("#next"); if (n) n.onclick = ()=>act("nextRound", s.round);
+  const a = $("#again"); if (a) a.onclick = ()=>act("rematch", s.created);
+  $("#peek").onclick = ()=>{ closeModal(); G.peeking = G.version; };
+  if (G.peeking===G.version) closeModal();
+}
+function showRules(){
+  openModal(`<h2>How to play</h2>
+  <ul>
+    <li><b>Goal:</b> lowest score after 7 rounds.</li>
+    <li>Each round has a <b>contract</b> you must lay down first:<br>
+      ${CONTRACTS.map((k,i)=>`${i+1}. ${contractText(i)} (${k.n} cards)`).join("<br>")}</li>
+    <li><b>Set</b> = 3 or more of the same number (any suits). <b>Run</b> = 4 or more in a row, all the same suit. Ace can be low (A-2-3-4) or high (J-Q-K-A).</li>
+    <li><b>Jokers are wild</b> (and 2s too, if the host turned that on).</li>
+    <li><b>Your turn:</b> draw from the deck or take the top discard → lay down / add cards → discard one card.</li>
+    <li>To lay down: tap cards to select them, tap <b>Make group</b> for each group, then <b>Lay down</b>.</li>
+    <li>After you're down, you can add cards to anyone's melds: select a card, then tap the meld.</li>
+    <li>First to get rid of every card wins the round. Everyone else scores what's left: 2–9 = 5, 10–K = 10, Ace = 15, Joker = 50${G.state&&G.state.settings&&G.state.settings.twosWild?", wild 2 = 20":""}.</li>
+    <li>You don't have to be watching — the game waits. When it's your turn, the page will tell you.</li>
+  </ul><button class="ghost" data-close style="width:100%">Got it</button>`,"rules");
+}
+
+/* ======================= BOOT ======================= */
+async function openGame(code){
+  G.code = code.toUpperCase(); G.state = null; G.version = -1; G.sel.clear(); G.staged = [];
+  G.be = makeBackend(G.code);
+  render();
+  try {
+    const row = await G.be.get();
+    if (!row) { G.code = null; history.replaceState(null,"",location.pathname); render(); toast("No game with that code"); return; }
+    applyRemote(row);
+  } catch(e){ toast(e.message); }
+  G.be.subscribe(row=>applyRemote(row));
+}
+G.pid = myId();
+const qs = new URLSearchParams(location.search).get("g");
+if (qs) openGame(qs); else render();
+setInterval(()=>{ if (G.code && !document.hidden) refresh(); }, ONLINE ? 5000 : 1500);
+document.addEventListener("visibilitychange", ()=>{ if (!document.hidden) refresh(); });
+</script>
+</body>
+</html>
