@@ -1,4 +1,4 @@
-// Shanghai Rummy service worker: shows push notifications and opens the game when tapped.
+// Shanghai Rummy service worker: shows push notifications and opens the game when one is tapped.
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
 
@@ -11,18 +11,24 @@ self.addEventListener("push", (e) => {
     badge: "icon.png",
     tag: d.tag || "rummy",
     renotify: true,
-    data: { url: d.url || "./" }
+    data: { url: d.url || self.registration.scope }
   }));
 });
 
 self.addEventListener("notificationclick", (e) => {
   e.notification.close();
-  const url = (e.notification.data && e.notification.data.url) || "./";
+  const scope = self.registration.scope;                       // e.g. https://dolantheduk-sudo.github.io/rummy/
+  const url = new URL((e.notification.data && e.notification.data.url) || scope, scope).href;
   e.waitUntil((async () => {
     const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-    for (const w of wins) {
-      if ("focus" in w) { try { await w.navigate(url); } catch (err) {} return w.focus(); }
+    // Only reuse a tab/window that is actually the rummy game (not some other page on the same site).
+    const game = wins.find((w) => w.url.startsWith(scope));
+    if (game) {
+      try { await game.focus(); } catch (err) {}
+      try { if (game.url !== url && "navigate" in game) await game.navigate(url); } catch (err) {}
+      return;
     }
-    return self.clients.openWindow(url);
+    // Nothing open: open the game straight to the right table.
+    if (self.clients.openWindow) await self.clients.openWindow(url);
   })());
 });
