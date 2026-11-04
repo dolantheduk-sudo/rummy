@@ -1,11 +1,17 @@
 {
+  "id": "./",
   "name": "Shanghai Rummy",
   "short_name": "Rummy",
+  "description": "Shanghai Rummy for the family — play from your own phone.",
+  "start_url": "./?app=1",
+  "scope": "./",
   "display": "standalone",
+  "orientation": "portrait",
   "background_color": "#08311f",
   "theme_color": "#08311f",
   "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "icon.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    { "src": "icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }

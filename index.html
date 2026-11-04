@@ -385,6 +385,21 @@ body.hol .opp{padding-top:20px}
 .marquee .suits{letter-spacing:12px}
 .suits .b{color:#7aa2ff;text-shadow:0 0 8px rgba(122,162,255,.7)}
 
+/* labeled header buttons */
+.top .tb{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;min-width:52px;height:50px;padding:4px 6px;border-radius:14px;font-size:20px;line-height:1}
+.top .tb .ti{font-size:19px;line-height:1}
+.top .tb .tl{font-size:10px;font-weight:700;letter-spacing:.2px;opacity:.9}
+.badge.dotb{min-width:10px;width:10px;height:10px;padding:0;top:-3px;right:-3px;background:#f5c542;box-shadow:0 0 0 2px #0b3d26}
+.turnt{color:#cfe9da;font-weight:600;white-space:nowrap}
+.okline{background:#e8f8ee;color:#1d6b3e;border-radius:12px;padding:9px 12px;font-weight:700;font-size:14px;margin:4px 0}
+/* four-color deck */
+body.four .card.s-D{color:#1659d6}
+body.four .card.s-C{color:#14833a}
+/* connection banner */
+#netbar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom) + 12px);z-index:85;display:flex;align-items:center;gap:10px;
+  background:#2b2b2b;color:#fff;font-weight:700;font-size:14px;padding:10px 16px;border-radius:22px;box-shadow:0 10px 26px rgba(0,0,0,.45);animation:dockIn .35s cubic-bezier(.2,1.4,.4,1)}
+#netbar.ok{background:#1d7a46}
+#netbar .spin{width:14px;height:14px;border-radius:50%;border:2.5px solid rgba(255,255,255,.3);border-top-color:#fff;animation:spin .8s linear infinite}
 /* =================== HOLIDAY THEMES =================== */
 #amb{position:fixed;inset:0;pointer-events:none;z-index:0}
 /* Valentine's Day */
@@ -456,7 +471,8 @@ const CONFIG = {
   SUPABASE_ANON_KEY: "sb_publishable_G_jk3EUPRAMZHbgj7jRpWQ_WaKaBWFH",
   VAPID_PUBLIC_KEY: "BPof_fqHE1NjrLszT3RXJMa14MVQqz4usrQN6w02VvaJN36h69oOziq8-HnngFv7Zk4zSgnJSyB514QJZwl3_rE"
 };
-if (new URLSearchParams(location.search).has("demo")) { CONFIG.SUPABASE_URL = ""; }
+if (new URLSearchParams(location.search).has("demo")) localStorage.setItem("sr_demo","1");
+if (localStorage.getItem("sr_demo")==="1") { CONFIG.SUPABASE_URL = ""; }
 
 /* ======================= RULES ======================= */
 const SUITS = ["S","H","C","D"];
@@ -584,6 +600,12 @@ function addLog(s,m,k,p,c,extra){
   s.log.push(Object.assign({t:Date.now(), n:s.seq, m, k, p, c}, extra||{}));
   if (s.log.length>60) s.log.splice(0, s.log.length-60);
 }
+const STALE_DAYS = 14;
+function totals(s){ return s.players.map(p=>({p, t:(s.scores&&s.scores[p.id]||[]).reduce((a,b)=>a+b,0)})).sort((a,b)=>a.t-b.t); }
+// Winner's player id, "tie", or null. A concede sets s.winner directly.
+function gameWinner(s){ if (s.winner) return s.winner; const t = totals(s); if (!t.length) return null; return t.length>1 && t[0].t===t[1].t ? "tie" : t[0].p.id; }
+function lastActivity(s){ return Math.max(s.created||0, s.turnAt||0, ...(s.log||[]).map(e=>e.t||0), ...(s.chat||[]).map(m=>m.t||0)); }
+const isActive = s => ["lobby","playing","roundOver"].includes(s.status);
 function bump(s,pid){ s.stats = s.stats || {}; return s.stats[pid] = s.stats[pid] || {draws:0, picks:0, outs:0, disc:{}}; }
 function myTurn(s,pid,phase){
   need(s.status==="playing", "The round isn't in progress");
@@ -607,7 +629,7 @@ function deal(s,r){
   s.discard = [deck.pop()]; s.stock = deck;
   s.down = {}; s.melds = []; s.nextMeld = 1;
   s.turn = (s.dealer + 1) % n; s.phase = "draw"; s.drawn = null;
-  s.status = "playing"; s.result = null; s.turnAt = Date.now();
+  s.status = "playing"; s.result = null; s.turnAt = Date.now(); s.undo = [];
   addLog(s, `Round ${r+1} dealt (${k} cards each) — ${contractText(r)}. ${s.players[s.turn].name} goes first.`, "deal");
 }
 function endRound(s,winner){
@@ -641,6 +663,27 @@ const Actions = {
     if (vs) m.vs = {u:String(vs.u), e:String(vs.e||"🎤").slice(0,8), l:String(vs.l||"").slice(0,24)}; else if (st) m.st = st; else m.text = text;
     s.chat.push(m);
     if (s.chat.length>150) s.chat.splice(0, s.chat.length-150);
+    return s;
+  },
+  cancelGame(s,pid){
+    need(pidx(s,pid)>=0, "You're not in this game");
+    if (s.status!=="lobby") return null;
+    s.status = "ended"; s.endReason = "cancelled"; s.endedBy = pid;
+    addLog(s, `${pname(s,pid)} cancelled the game`, "ended", pid);
+    return s;
+  },
+  concede(s,pid){
+    need(pidx(s,pid)>=0, "You're not in this game");
+    if (s.status!=="playing" && s.status!=="roundOver") return null;
+    const rest = totals(s).filter(x=>x.p.id!==pid);
+    s.status = "gameOver"; s.endReason = "concede"; s.concededBy = pid; s.winner = rest.length ? rest[0].p.id : null;
+    addLog(s, `${pname(s,pid)} conceded — ${pname(s,s.winner)} wins the game!`, "concede", pid, null, {w:s.winner});
+    return s;
+  },
+  expire(s,pid){
+    if (!isActive(s) || Date.now() - lastActivity(s) < STALE_DAYS*864e5) return null;
+    s.status = "ended"; s.endReason = "expired";
+    addLog(s, `This game closed after ${STALE_DAYS} days with no moves`, "ended");
     return s;
   },
   nudge(s,pid){
@@ -697,6 +740,7 @@ const Actions = {
     need(s.down[pid], "Lay down your contract before adding to melds");
     const m = s.melds.find(x=>x.id===meldId); need(m, "That meld is gone");
     cards.forEach(c=>need(s.hands[pid].includes(c), "That card isn't in your hand"));
+    const beforeMeld = JSON.stringify(m);
     let left = [...cards], placed = [], progress = true;
     while (left.length && progress) {
       progress = false;
@@ -706,10 +750,20 @@ const Actions = {
       }
     }
     need(placed.length, (cards.length===1 ? cardName(cards[0]) + " doesn't" : "Those cards don't") + " fit on " + meldLabel(m));
+    s.undo = s.undo || []; s.undo.push({pid, meldId, before:JSON.parse(beforeMeld), cards:placed});
     takeFromHand(s,pid,placed);
     addLog(s, `${pname(s,pid)} added ${placed.map(cardName).join(", ")} to ${pname(s,m.owner)}'s ${meldLabel(m)}`, "off", pid);
     s._leftover = left;
     checkOut(s,pid); return s;
+  },
+  undoLayOff(s,pid){
+    myTurn(s,pid,"play");
+    const u = (s.undo||[]).filter(x=>x.pid===pid).pop(); need(u, "Nothing to undo");
+    s.undo.splice(s.undo.lastIndexOf(u), 1);
+    const i = s.melds.findIndex(x=>x.id===u.meldId); need(i>=0, "That meld is gone");
+    s.melds[i] = u.before; s.hands[pid].push(...u.cards);
+    addLog(s, `${pname(s,pid)} took back ${u.cards.map(cardName).join(", ")}`, "undo", pid);
+    return s;
   },
   discard(s,pid,c){
     myTurn(s,pid,"play");
@@ -718,7 +772,7 @@ const Actions = {
     { const d = bump(s,pid).disc; d[c[0]] = (d[c[0]]||0) + 1; }
     addLog(s, `${pname(s,pid)} discarded ${cardName(c)}`, "discard", pid, c);
     if (!s.hands[pid].length) { endRound(s,pid); return s; }
-    s.turn = (s.turn+1) % s.players.length; s.phase = "draw"; s.drawn = null;
+    s.turn = (s.turn+1) % s.players.length; s.phase = "draw"; s.drawn = null; s.undo = [];
     s.turnAt = Date.now();
     return s;
   },
@@ -730,6 +784,7 @@ const Actions = {
   },
   rematch(s,pid,created){
     if (s.status!=="gameOver" || s.created!==created) return null;
+    delete s.winner; delete s.endReason; delete s.concededBy;
     s.scores = {}; s.players.forEach(p=>s.scores[p.id]=[]);
     s.created = Date.now(); s.log = []; s.stats = {};
     addLog(s, "New game started", "new"); deal(s,0); return s;
@@ -737,10 +792,11 @@ const Actions = {
 };
 
 /* ======================= BACKENDS ======================= */
-const ONLINE = !!(CONFIG.SUPABASE_URL && CONFIG.SUPABASE_ANON_KEY && window.supabase);
+const ONLINE = !!(CONFIG.SUPABASE_URL && CONFIG.SUPABASE_ANON_KEY);   // the real game (never silently falls back to demo)
+const LIB_MISSING = ONLINE && !window.supabase;                        // couldn't load the connection library (offline on first open)
 const TABLE = "rummy_games";
 let SB = null;
-if (ONLINE) SB = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+if (ONLINE && !LIB_MISSING) SB = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
 
 class LocalBackend {
   constructor(code){ this.key = "sr_local_" + code; }
@@ -753,10 +809,10 @@ class LocalBackend {
   subscribe(cb){ window.addEventListener("storage", e=>{ if (e.key===this.key && e.newValue) cb(JSON.parse(e.newValue)); }); }
 }
 class SupaBackend {
-  constructor(code){ this.code = code; this.sb = SB; }
+  constructor(code){ this.code = code; this.sb = SB; if (!SB) throw new Error("You're offline — check your connection and try again"); }
   async get(){
     const {data,error} = await this.sb.from(TABLE).select("state,version").eq("code",this.code).maybeSingle();
-    if (error) throw new Error("Connection problem: " + error.message);
+    if (error) throw new Error("Can't reach the game right now (" + error.message + ")");
     return data;
   }
   async create(state){
@@ -1022,10 +1078,11 @@ function applyHoliday(){
 const store = ONLINE ? localStorage : sessionStorage;
 const G = { code:null, pid:null, state:null, version:-1, be:null, sel:new Set(), staged:[], sort:localStorage.getItem("sr_sort")||"smart",
             busy:false, wasMyTurn:false, events:[], chatEvents:[], dealAnim:false, holdResult:0, suppressClick:false };
-const PREFS = Object.assign({big:false}, JSON.parse(localStorage.getItem("sr_prefs")||"{}"));
+const PREFS = Object.assign({big:false, four:false}, JSON.parse(localStorage.getItem("sr_prefs")||"{}"));
 function savePrefs(){ localStorage.setItem("sr_prefs", JSON.stringify(PREFS)); applyPrefs(); }
 function applyPrefs(){
   document.body.classList.toggle("bigcards", !!PREFS.big);
+  document.body.classList.toggle("four", !!PREFS.four);
 }
 // Each phone has its own player id PER GAME, so picking "I'm ___" in one game can't leak into others.
 const newPid = () => Math.random().toString(36).slice(2,10) + Math.random().toString(36).slice(2,6);
@@ -1113,6 +1170,8 @@ function applyRemote(row){
   G.wasMyTurn = mine;
   // live stickers (only fresh ones)
   if (G.code && G.pid) Presence.start(G.code, G.pid, onPresence);
+  if (G.code && G.pid && pidx(s,G.pid)>=0) Push.registerGame(G.code, G.pid);
+  if (!prev && isActive(s) && Date.now() - lastActivity(s) >= STALE_DAYS*864e5) setTimeout(()=>act("expire"), 50);
   for (const m of chatNew) {
     if (m.vs && Date.now()-m.t < 120000) setTimeout(()=>popVoice(m.vs, m.p, m.p===G.pid), 100);
     else if (m.st && Date.now()-m.t < 120000) setTimeout(()=>popSticker(m.st, m.p, m.p===G.pid), 100);
@@ -1142,7 +1201,18 @@ function playEvent(e, s){
     case "discard": Sound.play("flick"); Sound.play("thud", .18); return 500;
     case "lay": Sound.play("sparkle"); Sound.play("coins", 6); setTimeout(()=>FX.suits(innerWidth/2, innerHeight*.45, 14), 250); return 600;
     case "off": Sound.play("chip"); return 200;
+    case "undo": Sound.play("slide"); return 0;
     case "reshuffle": Sound.play("shuffle"); return 600;
+    case "ended":
+      if (e.p && e.p!==me) { Sound.play("aww"); toast(`${pname(s,e.p)} cancelled the game`); }
+      return 0;
+    case "concede": {
+      G.holdResult = Date.now() + 2300; setTimeout(()=>render(), 2350);
+      if (e.w===me) { Sound.play("fanfare"); setTimeout(()=>Sound.play("coins",18), 600); showBanner("You win!", `${pname(s,e.p)} conceded`, 2200); FX.confetti(160); FX.coins(50); }
+      else if (e.p===me) { Sound.play("aww"); showBanner("Game conceded", `${pname(s,e.w)} takes this one`, 2000); }
+      else { Sound.play("aww"); showBanner(`${pname(s,e.w)} wins!`, `${pname(s,e.p)} conceded`, 2000); }
+      return 0;
+    }
     case "nudge":
       if (e.to===me) { Sound.play("doorbell"); try{navigator.vibrate&&navigator.vibrate([200,100,200]);}catch(x){} showBanner("👉 Nudge!", `${pname(s,e.p)} is waiting on you`, 1800); }
       else if (e.p===me) toast(`👉 Nudged ${pname(s,e.to)}`);
@@ -1155,9 +1225,10 @@ function playEvent(e, s){
       return 0;
     }
     case "over": {
-      const tot = s.players.map(p=>({p, t:(s.scores[p.id]||[]).reduce((a,b)=>a+b,0)})).sort((a,b)=>a.t-b.t);
+      const w = gameWinner(s);
       setTimeout(()=>{ Sound.play("fanfare"); Sound.play("coins", 24); FX.fireworks(8); FX.coins(70); FX.confetti(180); }, 300);
-      if (tot[0] && (tot.length<2 || tot[0].t!==tot[1].t)) setTimeout(()=>showBanner(tot[0].p.id===me ? "You win!" : tot[0].p.name+" wins!", "🏆 Lowest score takes it", 2200), 300);
+      if (w && w!=="tie") setTimeout(()=>showBanner(w===me ? "You win!" : pname(s,w)+" wins!", "🏆 Lowest score takes it", 2200), 300);
+      else if (w==="tie") setTimeout(()=>showBanner("It's a tie!", "🏆 Dead even", 2200), 300);
       return 0;
     }
   }
@@ -1168,11 +1239,29 @@ function alertTurn(){
   Sound.play("chime");
   showBanner("Your turn!", "", 1100);
 }
-async function refresh(){ if (!G.be) return; try { applyRemote(await G.be.get()); } catch(e){} }
+/* ---------- connection ---------- */
+const Net = {
+  down: !navigator.onLine,
+  set(down){ if (this.down===down) return; this.down = down; this.paint(); if (!down) { refresh(); } },
+  paint(){
+    let b = document.getElementById("netbar");
+    if (!this.down) { if (b) { b.classList.add("ok"); b.textContent = "✅ Back online"; setTimeout(()=>{ if (!Net.down) b.remove(); }, 1600); } return; }
+    if (!b) { b = document.createElement("div"); b.id = "netbar"; document.body.appendChild(b); }
+    b.classList.remove("ok"); b.innerHTML = `<span class="spin"></span> You're offline — reconnecting…`;
+  }
+};
+addEventListener("offline", ()=>Net.set(true));
+addEventListener("online", ()=>Net.set(false));
+async function refresh(){
+  if (!G.be) return;
+  try { const row = await G.be.get(); Net.set(false); if (G.loadError) { G.loadError = null; } if (row) { if (!G.pid) resolvePid(G.code, row.state); applyRemote(row); } }
+  catch(e){ if (ONLINE) Net.set(true); }
+}
 
 // Chat, looks and nudges wait their turn instead of being dropped; game moves ignore double-taps.
 const QUEUED = new Set(["say","look","nudge"]);
 async function act(name, ...args){
+  if (ONLINE && (Net.down || !SB)) { toast("You're offline — nothing was sent. Try again when you're connected.", true); return false; }
   if (G.busy) { if (!QUEUED.has(name)) return false; while (G.busy) await sleep(60); }
   G.busy = true;
   try {
@@ -1191,7 +1280,7 @@ async function act(name, ...args){
       }
     }
     toast("Someone else moved at the same time — try again");
-  } catch(e){ toast(e.message, true); }
+  } catch(e){ if (ONLINE && !navigator.onLine) Net.set(true); toast(Net.down ? "You're offline — nothing was sent. Try again when you're connected." : e.message, true); }
   finally { G.busy = false; }
   return false;
 }
@@ -1201,13 +1290,13 @@ const Profiles = {
   key: n => String(n||"").trim().toLowerCase(),
   async get(name){
     try {
-      if (ONLINE) { const {data} = await SB.from("rummy_profiles").select("look").eq("name", this.key(name)).maybeSingle(); return data && data.look; }
+      if (ONLINE && SB) { const {data} = await SB.from("rummy_profiles").select("look").eq("name", this.key(name)).maybeSingle(); return data && data.look; }
       const all = JSON.parse(localStorage.getItem("sr_profiles")||"{}"); return all[this.key(name)];
     } catch(e){ return null; }
   },
   async save(name, look){
     try {
-      if (ONLINE) await SB.from("rummy_profiles").upsert({name:this.key(name), look, updated_at:new Date().toISOString()});
+      if (ONLINE && SB) await SB.from("rummy_profiles").upsert({name:this.key(name), look, updated_at:new Date().toISOString()});
       else { const all = JSON.parse(localStorage.getItem("sr_profiles")||"{}"); all[this.key(name)] = look; localStorage.setItem("sr_profiles", JSON.stringify(all)); }
     } catch(e){}
   }
@@ -1220,17 +1309,20 @@ const Rivalry = {
     if (localStorage.getItem("sr_rec_"+id)) return;
     const key = p => Profiles.key(p.name);
     const tot = s.players.map(p=>({n:key(p), t:(s.scores[p.id]||[]).reduce((a,b)=>a+b,0)})).sort((a,b)=>a.t-b.t);
-    const winner = tot.length>1 && tot[0].t===tot[1].t ? "tie" : tot[0].n;
+    const w = gameWinner(s);
+    const winner = w==="tie" ? "tie" : key(s.players.find(p=>p.id===w) || {name:""});
     const st = s.stats || {};
     const detail = {
       rounds: Object.fromEntries(s.players.map(p=>[key(p), s.scores[p.id]||[]])),
       outs:   Object.fromEntries(s.players.map(p=>[key(p), (st[p.id]||{}).outs||0])),
       disc:   Object.fromEntries(s.players.map(p=>[key(p), (st[p.id]||{}).disc||{}])),
       picks:  Object.fromEntries(s.players.map(p=>[key(p), (st[p.id]||{}).picks||0])),
+      reason: s.endReason || "finished",
+      conceded: s.concededBy ? key(s.players.find(p=>p.id===s.concededBy)||{name:""}) : null,
     };
     const row = {id, pair:this.pairKey(s), winner, totals:Object.fromEntries(tot.map(x=>[x.n,x.t])), detail, finished_at:new Date().toISOString()};
     try {
-      if (ONLINE) { const {error} = await SB.from("rummy_results").insert(row); if (error && error.code !== "23505") return; }
+      if (ONLINE && SB) { const {error} = await SB.from("rummy_results").insert(row); if (error && error.code !== "23505") return; }
       else { const all = JSON.parse(localStorage.getItem("sr_results")||"{}"); all[id] = row; localStorage.setItem("sr_results", JSON.stringify(all)); }
       localStorage.setItem("sr_rec_"+id, "1"); History.load(true);
     } catch(e){}
@@ -1255,7 +1347,7 @@ const Presence = (()=>{
     start(c, pid, cb){
       if (code===c && me===pid) return;
       this.stop(); code = c; me = pid; onChange = cb || onChange; peers = {};
-      if (ONLINE) {
+      if (ONLINE && SB) {
         ch = SB.channel("room-"+c, {config:{presence:{key:pid}}});
         ch.on("presence", {event:"sync"}, ()=>{
           const st = ch.presenceState(); const next = {};
@@ -1362,7 +1454,7 @@ const History = {
       await null;
       let rows = [];
       try {
-        if (ONLINE) { const {data} = await SB.from("rummy_results").select("id,pair,winner,totals,detail,finished_at").order("finished_at", {ascending:true}); rows = data||[]; }
+        if (ONLINE && SB) { const {data} = await SB.from("rummy_results").select("id,pair,winner,totals,detail,finished_at").order("finished_at", {ascending:true}); rows = data||[]; }
         else rows = Object.values(JSON.parse(localStorage.getItem("sr_results")||"{}")).sort((a,b)=>(a.finished_at||"").localeCompare(b.finished_at||""));
       } catch(e){}
       this.rows = rows; this.at = Date.now();
@@ -1493,7 +1585,7 @@ function cardHTML(c, cls="big", extra=""){
   const red = c[1]==="H"||c[1]==="D", r = rankLabel(c), su = SYM[c[1]];
   const mid = "JQK".includes(c[0]) ? `<div class="m face"><span class="fr">${r}</span><span class="fs">${su}</span></div>`
             : c[0]==="A" ? `<div class="m ace">${su}</div>` : `<div class="m">${su}</div>`;
-  return `<div class="card ${red?"red":""} ${cls} ${extra}" data-c="${c}"><div class="c">${r}<br>${su}</div>${mid}<div class="c2">${r}<br>${su}</div></div>`;
+  return `<div class="card ${red?"red":""} s-${c[1]} ${cls} ${extra}" data-c="${c}"><div class="c">${r}<br>${su}</div>${mid}<div class="c2">${r}<br>${su}</div></div>`;
 }
 /* ---------- player looks ---------- */
 const AVATARS = ["🃏","🐱","🐶","🦋","🌸","🌻","🍀","🦄","🐝","🦊","🐼","🐧","🦉","🐢","🐠","🍒","🍓","🎲","💎","👑","⭐","🌙","☕","🍷","🧁","🎀","💋","😎","🤠","👵","🧙‍♀️","🦩"];
@@ -1658,9 +1750,10 @@ function timeAgo(t){
   const h = Math.round(m/60); if (h<24) return h+"h ago";
   return new Date(t).toLocaleDateString(undefined,{month:"short",day:"numeric"});
 }
+function since(t){ if (!t) return ""; const m = Math.max(0, Math.round((Date.now()-t)/60000)); return m<1 ? "just now" : m<60 ? m+"m" : m<1440 ? Math.round(m/60)+"h" : Math.round(m/1440)+"d"; }
 const unread = s => Math.max(0, (s.chat||[]).filter(m=>m.p!==G.pid && m.n > +(localStorage.getItem(readKey())||0)).length);
 
-function screenKey(){ const s = G.state; return !G.code ? "home" : !s ? "load" : pidx(s,G.pid)<0 ? "join" : s.status==="lobby" ? "lobby" : "game"; }
+function screenKey(){ const s = G.state; return !G.code ? "home" : !s ? "load" : s.status==="ended" ? "ended" : pidx(s,G.pid)<0 ? "join" : s.status==="lobby" ? "lobby" : "game"; }
 function render(){
   const key = screenKey();
   renderScreen();
@@ -1671,7 +1764,16 @@ function renderScreen(){
   if (D) cancelDrag();
   if (!G.code) return renderHome(app);
   const s = G.state;
+  if (!s && G.loadError) {
+    app.innerHTML = `${marquee()}<div class="panel col center"><div style="font-size:44px">📡</div>
+      <div style="font-size:20px;font-weight:800">Can't reach the game</div>
+      <div class="muted">Check your Wi-Fi or data. Your game is safe — nothing is lost.</div>
+      <button id="retry" class="cta">↻ Try again</button><button class="ghost" id="retryhome">🏠 Home screen</button></div>`;
+    $("#retry").onclick = ()=>{ if (!SB && ONLINE) return location.reload(); openGame(G.code); };
+    $("#retryhome").onclick = goHome; return;
+  }
   if (!s) { app.innerHTML = `${marquee()}<div class="skel"></div><div class="skel tall"></div><div class="skel"></div>`; return; }
+  if (s.status==="ended") { if (G.modalKind) closeModal(); return renderEnded(app,s); }
   if (pidx(s,G.pid) < 0) return renderJoin(app,s);
   if (s.status==="lobby") return renderLobby(app,s);
   renderGame(app,s);
@@ -1679,15 +1781,14 @@ function renderScreen(){
   else if (G.modalKind==="result") closeModal();
 }
 
+const tb = (id, icon, label, extra="") => `<button class="ghost tb" id="${id}" aria-label="${label}"><span class="ti">${icon}</span><span class="tl">${label}</span>${extra}</button>`;
 function pushButtonHTML(){
-  if (!ONLINE) return "";
   const st = Push.status();
-  if (st==="on") return `<button class="ghost small" id="bell">🔔</button>`;
   if (st==="unsupported") return "";
-  return `<button class="ghost small" id="bell">🔕</button>`;
+  return st==="on" ? tb("bell","🔔","Alerts") : tb("bell","🔕","Alerts",'<span class="badge dotb"></span>');
 }
 function wireBell(){ const b=$("#bell"); if (b) b.onclick = ()=>Push.enable(); }
-function chatButtonHTML(s){ const n = unread(s); return `<button class="ghost small" id="chatb">💬${n?`<span class="badge">${n}</span>`:""}</button>`; }
+function chatButtonHTML(s){ const n = unread(s); return tb("chatb","💬","Chat", n?`<span class="badge">${n}</span>`:""); }
 
 function renderHome(app){
   const nm = localStorage.getItem("sr_name") || "";
@@ -1705,7 +1806,8 @@ function renderHome(app){
       <label>Have a game code?</label>
       <div class="row"><input type="text" id="code" maxlength="5" placeholder="ABCDE" style="text-transform:uppercase"><button id="go">Join</button></div>
     </div>
-    <div class="center"><button class="ghost small" id="rules">How to play</button> <button class="ghost small" id="snd">${Sound.on?"🔊 Sound on":"🔇 Sound off"}</button></div>`;
+    <div id="found"></div>
+    <div class="center"><button class="ghost small" id="rules">❓ How to play</button> <button class="ghost small" id="homeset">⚙️ Settings</button></div>`;
   $("#newg").onclick = async ()=>{
     const name = $("#nm").value.trim(); if (!name) return toast("Type your name first", true);
     localStorage.setItem("sr_name", name);
@@ -1721,8 +1823,37 @@ function renderHome(app){
   const rs = $("#resume"); if (rs) rs.onclick = ()=>{ history.replaceState(null,"","?g="+last); openGame(last); };
   $("#go").onclick = ()=>{ const c = $("#code").value.trim().toUpperCase(); if (c.length<4) return toast("Enter the game code", true); history.replaceState(null,"","?g="+c); openGame(c); };
   $("#rules").onclick = showRules;
-  $("#snd").onclick = ()=>{ Sound.toggle(); render(); };
+  $("#homeset").onclick = ()=>showSettings();
+  let findT = null;
+  $("#nm").oninput = ()=>{ clearTimeout(findT); const v = $("#nm").value.trim(); findT = setTimeout(()=>{ if (v.length>=2 && !localStorage.getItem("sr_last")) Games.findByName(v).then(list=>{ const g=list[0], el=$("#found"); if (!g||!el||G.code) return;
+    const others = g.state.players.filter(p=>Profiles.key(p.name)!==Profiles.key(v)).map(p=>p.name).join(" & ") || "your table";
+    el.innerHTML = `<button id="foundbtn" class="cta" style="width:100%;margin:2px 0 8px">▶ Back to your game with ${esc(others)}</button>`;
+    $("#foundbtn").onclick = ()=>{ localStorage.setItem("sr_name", v); history.replaceState(null,"","?g="+g.code); openGame(g.code); }; }); }, 600); };
+  if (!last && nm) Games.findByName(nm).then(list=>{
+    const g = list[0], el = $("#found"); if (!g || !el || G.code) return;
+    const others = g.state.players.filter(p=>Profiles.key(p.name)!==Profiles.key(nm)).map(p=>p.name).join(" & ") || "your table";
+    el.innerHTML = `<button id="foundbtn" class="cta" style="width:100%;margin:2px 0 8px">▶ Back to your game with ${esc(others)}</button>`;
+    $("#foundbtn").onclick = ()=>{ history.replaceState(null,"","?g="+g.code); openGame(g.code); };
+  });
 }
+// Looks up open games by player name. Used for "Back to your game" when this phone/app hasn't seen it yet,
+// and ready to power a full "My games" list later.
+const Games = {
+  async findByName(name){
+    const key = Profiles.key(name); if (!key) return [];
+    let rows = [];
+    try {
+      if (ONLINE && SB) {
+        const {data} = await SB.from(TABLE).select("code,state,updated_at").order("updated_at", {ascending:false}).limit(40);
+        rows = data || [];
+      } else {
+        rows = Object.keys(localStorage).filter(k=>k.startsWith("sr_local_")).map(k=>({code:k.slice(9), state:JSON.parse(localStorage.getItem(k)).state}));
+      }
+    } catch(e){ return []; }
+    return rows.filter(r=>r.state && isActive(r.state) && r.state.players.some(p=>Profiles.key(p.name)===key))
+               .sort((a,b)=>lastActivity(b.state)-lastActivity(a.state));
+  }
+};
 async function myLookFor(name){
   const saved = await Profiles.get(name);
   const look = Object.assign(defaultLook(), saved || {});
@@ -1730,6 +1861,27 @@ async function myLookFor(name){
   return look;
 }
 
+function goHome(){
+  Presence.stop(); closeModal();
+  G.code = null; G.state = null; G.version = -1; G.sel.clear(); G.staged = [];
+  history.replaceState(null, "", location.pathname);
+  render();
+}
+function renderEnded(app,s){
+  if (localStorage.getItem("sr_last")===G.code) localStorage.removeItem("sr_last");
+  const by = s.players.find(p=>p.id===s.endedBy);
+  const expired = s.endReason==="expired";
+  app.innerHTML = `${marquee("★ TABLE CLOSED ★")}
+    <div class="panel col center">
+      <div style="font-size:44px">${expired?"⌛":"🛑"}</div>
+      <div style="font-size:20px;font-weight:800">${expired?`This game closed after ${STALE_DAYS} days with no moves`:by?`${nameHTML(by)} cancelled this game`:"This game was cancelled"}</div>
+      <div class="muted">It doesn't count toward stats or the all-time record.</div>
+      <button id="newfromend" class="cta">🎰 Start a new game</button>
+      <button class="ghost" id="homefromend">🏠 Home screen</button>
+    </div>`;
+  $("#newfromend").onclick = goHome;
+  $("#homefromend").onclick = goHome;
+}
 function claimButtons(s){
   return s.players.map(p=>`<button class="ghost" data-claim="${esc(p.id)}">${avatarHTML(p,"sm")} I'm ${esc(p.name)}</button>`).join("");
 }
@@ -1812,7 +1964,7 @@ function renderGame(app,s){
 
   let status;
   if (s.status!=="playing") status = `Round over — <button class="small" id="showres">Show results</button>`;
-  else if (!mine) status = `${Presence.get(turnPid).online && Presence.get(turnPid).active ? "🤔 "+esc(pname(s,turnPid))+" is thinking…" : "Waiting for "+esc(pname(s,turnPid))+"…"} <button class="small" id="nudge" ${nudgeWait?"disabled":""} style="margin-left:6px">👉 ${nudgeWait?`Nudge in ${nudgeWait}m`:"Nudge"}</button>`;
+  else if (!mine) status = `${Presence.get(turnPid).online && Presence.get(turnPid).active ? "🤔 "+esc(pname(s,turnPid))+" is thinking…" : "Waiting for "+esc(pname(s,turnPid))+"…"}${s.turnAt?` <span class="turnt" style="font-weight:600">(${since(s.turnAt)})</span>`:""} <button class="small" id="nudge" ${nudgeWait?"disabled":""} style="margin-left:6px">👉 ${nudgeWait?`Nudge in ${nudgeWait}m`:"Nudge"}</button>`;
   else if (s.phase==="draw") status = "Your turn! Tap the deck or the discard pile.";
   else if (!down) status = "Make your groups and lay down if you can — then discard.";
   else status = "Add cards to any meld (select, then tap it) — then discard.";
@@ -1822,7 +1974,8 @@ function renderGame(app,s){
   const opps = s.players.filter(p=>p.id!==me).map(p=>{
     const n = (s.hands[p.id]||[]).length;
     const pr = Presence.get(p.id), theirTurn = p.id===turnPid && s.status==="playing";
-    const live = pr.online && pr.active ? (theirTurn ? `<span class="think">🤔 thinking<i>.</i><i>.</i><i>.</i></span>` : `<span class="here">● here</span>`) : (pr.online ? `<span class="away">away</span>` : "");
+    const live = (pr.online && pr.active ? (theirTurn ? `<span class="think">🤔 thinking<i>.</i><i>.</i><i>.</i></span>` : `<span class="here">● here</span>`) : (pr.online ? `<span class="away">away</span>` : ""))
+      + (theirTurn && s.turnAt ? ` <span class="turnt">⏱ ${since(s.turnAt)}</span>` : "");
     return `<div class="opp ${theirTurn?"turn":""}" data-pid="${esc(p.id)}">
       ${avatarHTML(p,"",{presence:true})}
       <div style="min-width:0"><div>${nameHTML(p)} ${s.down[p.id]?'<span class="tag down">down ✓</span>':''}</div>
@@ -1855,6 +2008,7 @@ function renderGame(app,s){
   const buttons = [];
   if (mine && s.phase==="play") {
     if (!down) buttons.push(`<button class="ghost" id="group" ${G.sel.size>=3?"":"disabled"}>Make group (${G.sel.size})</button>`);
+    if ((s.undo||[]).some(u=>u.pid===me)) buttons.push(`<button class="ghost" id="undo">↩️ Undo add</button>`);
     buttons.push(`<button id="disc" ${G.sel.size===1?"":"disabled"}>Discard${G.sel.size===1?" "+cardName([...G.sel][0]):""}</button>`);
   }
   const under = n => n>2 ? '<div class="card big back under2"></div><div class="card big back under"></div>' : n>1 ? '<div class="card big back under"></div>' : "";
@@ -1865,8 +2019,8 @@ function renderGame(app,s){
       <div class="info"><div class="rnd goldtext">ROUND ${s.round+1} OF ${ROUNDS}${HOLIDAY?` <span class="holtag">${esc(HOLIDAY.name)}</span>`:""}</div><div class="contract">${contractText(s.round)}</div></div>
       ${pushButtonHTML()}
       ${chatButtonHTML(s)}
-      <button class="ghost small" id="scores">📊</button>
-      <button class="ghost small" id="setb">⚙️</button>
+      ${tb("scores","📊","Scores")}
+      ${tb("setb","⚙️","Settings")}
     </div>
     ${ONLINE?"":`<div class="banner">Demo mode (this device only)</div>`}
     <div class="opps">${opps}</div>
@@ -1910,6 +2064,7 @@ function renderGame(app,s){
   $("#chatb").onclick = openChat;
   wireBell();
   const gb = $("#group"); if (gb) gb.onclick = ()=>{ G.staged.push(sortHand([...G.sel],"suit")); G.sel.clear(); Sound.play("chip"); render(); };
+  const ub = $("#undo"); if (ub) ub.onclick = ()=>act("undoLayOff");
   const db = $("#disc"); if (db) db.onclick = async ()=>{ const c=[...G.sel][0]; if (await act("discard",c)) { G.sel.delete(c); } };
   app.querySelectorAll("[data-unstage]").forEach(b=>b.onclick=()=>{ G.staged.splice(+b.dataset.unstage,1); render(); });
   const cs = $("#clearstage"); if (cs) cs.onclick = ()=>{ G.staged=[]; render(); };
@@ -1987,18 +2142,18 @@ async function showStats(tab){
 }
 function showLog(s){ openModal(`<h2>📜 What happened</h2>${[...s.log].reverse().map(l=>`<div class="logl">${esc(l.m)}</div>`).join("")}<br><button class="ghost" data-close style="width:100%">Close</button>`,"log"); }
 function showResult(s){
-  const r = s.result; if (!r) return;
+  const r = s.result || (s.status==="gameOver" ? {winner:null, pts:{}, hands:{}} : null); if (!r) return;
   if (SIDE_SHEETS.has(G.modalKind)) return;
   if (G.peeking===G.version) { if (G.modalKind==="result") closeModal(); return; }
   if (G.modalKind==="result" && G.resultFor===G.version) return;
   const over = s.status==="gameOver";
   let head;
+  const conceded = over && s.endReason==="concede";
   if (over) {
-    const tot = s.players.map(p=>({p, t:s.scores[p.id].reduce((a,b)=>a+b,0)})).sort((a,b)=>a.t-b.t);
-    const tie = tot.length>1 && tot[0].t===tot[1].t;
-    head = `<div class="winner">🏆 ${tie?"It's a tie!":esc(tot[0].p.name)+" wins the game!"}</div>`;
+    const w = gameWinner(s);
+    head = `<div class="winner">🏆 ${w==="tie"?"It's a tie!":esc(pname(s,w))+" wins the game!"}</div>${conceded?`<div class="center" style="color:#8a6a2a;font-weight:700;margin:-6px 0 10px">🏳️ ${esc(pname(s,s.concededBy))} conceded</div>`:""}`;
   } else head = `<div class="winner">${esc(pname(s,r.winner))} went out! 🎉</div>`;
-  const hands = s.players.filter(p=>p.id!==r.winner).map(p=>`
+  const hands = conceded ? "" : s.players.filter(p=>p.id!==r.winner).map(p=>`
     <div class="result"><div class="who">${avatarHTML(p,"sm")} ${esc(p.name)}: +${r.pts[p.id]} pts</div>
     <div class="cards">${r.hands[p.id].map(c=>cardHTML(c,"mini")).join("")}</div></div>`).join("");
   const btn = over
@@ -2006,7 +2161,7 @@ function showResult(s){
     : s.round >= ROUNDS-1
       ? `<button id="next" class="cta" style="width:100%">🏆 See the final results</button>`
       : `<button id="next" class="cta" style="width:100%">Deal round ${s.round+2}: ${contractText(s.round+1)} (${CONTRACTS[s.round+1].n} cards)</button>`;
-  openModal(`<h2>${over?"Game over":"Round "+(s.round+1)+" finished"}</h2>${head}${hands}${over?rivalryBox(s):""}<h3>Scores</h3>${scoreTable(s)}${btn}
+  openModal(`<h2>${over?(conceded?"Game conceded":"Game over"):"Round "+(s.round+1)+" finished"}</h2>${head}${hands}${over?rivalryBox(s):""}<h3>Scores</h3>${scoreTable(s)}${btn}
     <button class="ghost" id="peek" style="width:100%;margin-top:8px">Look at the table</button>`, "result");
   G.resultFor = G.version;
   const n = $("#next"); if (n) n.onclick = ()=>{ closeModal(); act("nextRound", s.round); };
@@ -2116,11 +2271,35 @@ function openRecorder(){
 
 /* ---------- settings: my look, reminders, big cards, sound ---------- */
 let lookSaveTimer = null;
-function showSettings(){
-  const s = G.state; if (!s) return;
-  const me = s.players.find(p=>p.id===G.pid); if (!me) return;
+function devicePrefsHTML(){
+  return `<h3>This phone</h3>
+    <div class="pick" data-pref="1">
+      <button data-p="big" class="${PREFS.big?"on":""}">🔍 Bigger cards</button>
+      <button data-p="four" class="${PREFS.four?"on":""}">🎨 Four-color deck</button>
+      <button data-p="sound" class="${Sound.on?"on":""}">🔊 Sounds</button>
+    </div>
+    <p class="muted" style="color:#777;font-size:12px;margin-top:-6px">Four-color deck makes ♦ blue and ♣ green so suits are easier to tell apart.</p>`;
+}
+function wireDevicePrefs(){
+  document.querySelectorAll(".pick[data-pref] button").forEach(b=>b.onclick=()=>{
+    if (b.dataset.p==="big") { PREFS.big = !PREFS.big; savePrefs(); b.classList.toggle("on", PREFS.big); }
+    if (b.dataset.p==="four") { PREFS.four = !PREFS.four; savePrefs(); b.classList.toggle("on", PREFS.four); }
+    if (b.dataset.p==="sound") { const on = Sound.toggle(); b.classList.toggle("on", on); }
+    Sound.play("tap");
+  });
+}
+function showSettings(section){
+  const s = G.state, me = s && s.players.find(p=>p.id===G.pid);
+  if (!me) {   // home screen: only this phone's settings
+    openModal(`<h2>⚙️ Settings</h2>${devicePrefsHTML()}
+      <div class="row" style="gap:8px;margin-top:6px"><button class="ghost" id="rulesb" style="flex:1">❓ How to play</button></div>
+      <p class="muted" style="color:#777;font-size:12px">Your avatar, name style, alerts and reminders are set from inside a game.</p>`, "settings");
+    wireDevicePrefs(); $("#rulesb").onclick = showRules; return;
+  }
   const L = lookOf(me);
+  const N = Object.assign({chat:true, round:true, nudge:true}, L.notify||{});
   const pick = (k, opts, cls="") => `<div class="pick ${cls}" data-k="${k}">${opts.map(([v,lab,style])=>`<button data-v="${esc(v)}" class="${String(L[k])===String(v)?"on":""} ${cls==="sw"?"sw":""}" ${style?`style="${style}"`:""}>${lab}</button>`).join("")}</div>`;
+  const pst = Push.status();
   openModal(`<h2>⚙️ Settings</h2>
     <div class="preview" id="lookprev"></div>
     <h3>Photo</h3>
@@ -2130,19 +2309,35 @@ function showSettings(){
     <h3>Avatar border</h3>${pick("bd", Object.entries(BORDERS).map(([v,l])=>[v,l]))}
     <h3>Name style</h3>${pick("ft", Object.entries(FONTS).map(([v,l])=>[v,`<span class="f-${v}">${l}</span>`]))}
     <h3>Name color</h3>${pick("col", NAME_COLORS.map(c=>[c,"",`background:${c};box-shadow:inset 0 0 0 2px #999`]), "sw")}
-    <h3>Turn reminders</h3>
-    <div class="muted" style="color:#666">If it's your turn and you haven't played, your phone gets a reminder this often (no reminders 10pm–8am). Needs 🔔 alerts turned on.</div>
-    ${pick("remind", [[0,"Off"],[1,"Every hour"],[2,"Every 2 hours"],[4,"Every 4 hours"],[8,"Every 8 hours"]])}
-    ${(L.voices||[]).length ? `<h3>My sounds</h3><div class="vgrid">${L.voices.map((v,i)=>`<span class="vchip has"><button data-pv="${i}">${esc(v.e)}<small>${esc(v.l||"Voice")}</small></button><button class="del" data-dv="${i}">✕</button></span>`).join("")}</div>` : ""}
-    <h3>This phone</h3>
-    <div class="pick" data-pref="1">
-      <button data-p="big" class="${PREFS.big?"on":""}">🔍 Bigger cards</button>
-      <button data-p="sound" class="${Sound.on?"on":""}">🔊 Sounds</button>
+    <div id="alerts"></div>
+    <h3>🔔 Phone alerts</h3>
+    ${pst==="on" ? `<div class="okline">✅ On for this phone — every game you play will buzz you.</div>`
+      : pst==="unsupported" ? `<div class="muted" style="color:#777">This browser can't show alerts.</div>`
+      : `<button id="alerton" style="width:100%;margin:4px 0 6px">🔔 Turn on alerts</button>`}
+    <div class="muted" style="color:#666;margin-top:4px">You always get an alert when it's your turn. Also alert me for:</div>
+    <div class="pick" id="notify">
+      <button data-n="chat" class="${N.chat?"on":""}">💬 Chat & stickers</button>
+      <button data-n="nudge" class="${N.nudge?"on":""}">👉 Nudges</button>
+      <button data-n="round" class="${N.round?"on":""}">🏁 Round results</button>
     </div>
-    <div class="row" style="gap:8px;margin-top:6px"><button class="ghost" id="rulesb" style="flex:1">How to play</button><button class="ghost" id="logb2" style="flex:1">📜 Game log</button></div>
-    <p class="muted" style="color:#777;font-size:12px">Your look is saved under your name (${esc(me.name)}), so it comes back in every new game.</p>
+    <h3>⏰ Turn reminders</h3>
+    <div class="muted" style="color:#666">If it's your turn and you haven't played, get a reminder this often (never 10pm–8am).</div>
+    ${pick("remind", [[0,"Off"],[1,"Every hour"],[2,"Every 2 hours"],[4,"Every 4 hours"],[8,"Every 8 hours"]])}
+    ${(L.voices||[]).length ? `<h3>🎤 My sounds</h3><div class="vgrid">${L.voices.map((v,i)=>`<span class="vchip has"><button data-pv="${i}">${esc(v.e)}<small>${esc(v.l||"Voice")}</small></button><button class="del" data-dv="${i}">✕</button></span>`).join("")}</div>` : ""}
+    ${devicePrefsHTML()}
+    <p class="muted" style="color:#777;font-size:12px">Your look and alert choices are saved under your name (${esc(me.name)}), so they come back in every new game.</p>
+    <h3>This game</h3>
+    <div class="row" style="gap:8px;margin:6px 0 10px">
+      <button class="ghost" id="gohome" style="flex:1">🏠 Home screen</button>
+      ${s.status==="lobby" ? `<button class="ghost" id="cancelgame" style="flex:1;color:#b3122e">🛑 Cancel game</button>`
+        : isActive(s) ? `<button class="ghost" id="concede" style="flex:1;color:#b3122e">🏳️ Concede</button>` : ""}
+    </div>
+    <p class="muted" style="color:#777;font-size:12px;margin-top:-4px">${s.status==="lobby" ? "Home screen keeps this game saved so you can come back to it. Cancel closes it before anyone plays."
+      : "Home screen keeps this game saved so you can come back to it. Conceding ends the game as a loss for you and a win for the other player."} Games with no moves for ${STALE_DAYS} days close on their own.</p>
+    <div class="row" style="gap:8px;margin-bottom:8px"><button class="ghost" id="rulesb" style="flex:1">❓ How to play</button><button class="ghost" id="logb2" style="flex:1">📜 Game log</button></div>
     <button class="ghost" id="notme" style="width:100%;margin-bottom:8px">🙋 I'm not ${esc(me.name)} — switch player</button>
     <button class="ghost" data-close style="width:100%">Done</button>`, "settings");
+  if (section==="alerts") setTimeout(()=>$("#alerts")?.scrollIntoView({behavior:"smooth"}), 120);
   const prev = ()=>{ const el=$("#lookprev"); if (el) el.innerHTML = `${avatarHTML({look:L,name:me.name},"lg")}<span style="font-size:24px">${nameHTML({look:L,name:me.name})}</span>`; };
   prev();
   const queueSave = ()=>{ clearTimeout(lookSaveTimer); lookSaveTimer = setTimeout(()=>saveMyLook(L), 500); };
@@ -2151,23 +2346,34 @@ function showSettings(){
     L[k] = v; if (k==="av") delete L.img;
     b.parentElement.querySelectorAll("button").forEach(x=>x.classList.toggle("on", x===b)); prev(); Sound.play("tap"); queueSave();
   });
+  document.querySelectorAll("#notify [data-n]").forEach(b=>b.onclick=()=>{
+    N[b.dataset.n] = !N[b.dataset.n]; L.notify = Object.assign({}, N); b.classList.toggle("on", N[b.dataset.n]); Sound.play("tap"); queueSave();
+  });
+  const ao = $("#alerton"); if (ao) ao.onclick = async ()=>{ await Push.enable(); if (Push.on()) { closeModal(); showSettings("alerts"); } };
   $("#selfie").onclick = async ()=>{
     try {
       const blob = await Media.pickSelfie(); if (!blob) return;
       const b = $("#selfie"); b.disabled = true; b.textContent = "Saving photo…";
       L.img = await Media.upload(blob, "avatars", "jpg"); prev(); saveMyLook(L); Sound.play("sparkle");
       b.disabled = false; b.textContent = "📸 Retake selfie";
-    } catch(e){ toast("Couldn't use that photo: " + e.message, true); }
+    } catch(e){ toast("Couldn't use that photo: " + e.message, true); const b = $("#selfie"); if (b) { b.disabled = false; b.textContent = "📸 Take a selfie"; } }
   };
   const ns = $("#noselfie"); if (ns) ns.onclick = ()=>{ delete L.img; prev(); saveMyLook(L); ns.remove(); };
   document.querySelectorAll("[data-pv]").forEach(b=>b.onclick=()=>Media.play((L.voices||[])[+b.dataset.pv].u));
   document.querySelectorAll("[data-dv]").forEach(b=>b.onclick=()=>{ L.voices.splice(+b.dataset.dv,1); saveMyLook(L); b.parentElement.remove(); });
-  document.querySelectorAll(".pick[data-pref] button").forEach(b=>b.onclick=()=>{
-    if (b.dataset.p==="big") { PREFS.big = !PREFS.big; savePrefs(); b.classList.toggle("on", PREFS.big); }
-    if (b.dataset.p==="sound") { const on = Sound.toggle(); b.classList.toggle("on", on); }
-  });
+  wireDevicePrefs();
   $("#rulesb").onclick = showRules;
   $("#logb2").onclick = ()=>showLog(G.state);
+  $("#gohome").onclick = goHome;
+  const cg = $("#cancelgame"); if (cg) cg.onclick = async ()=>{
+    if (!confirm("Cancel this game?\n\nIt hasn't started yet, so nothing is counted.")) return;
+    closeModal(); if (await act("cancelGame")) Sound.play("thud");
+  };
+  const cc = $("#concede"); if (cc) cc.onclick = async ()=>{
+    const other = totals(s).filter(x=>x.p.id!==me.id)[0];
+    if (!confirm(`Concede this game?\n\nIt counts as a loss for you${other?` and a win for ${other.p.name}`:""}.`)) return;
+    closeModal(); await act("concede");
+  };
   $("#notme").onclick = ()=>{
     if (!confirm(`This phone will stop playing as ${me.name}. You'll then join with your own name (or pick your player if the game already started).`)) return;
     closeModal(); setPid(G.code, newPid()); G.version = -1; G.state = null; G.sel.clear(); G.staged = []; refresh();
@@ -2195,48 +2401,62 @@ const Push = (()=>{
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform==="MacIntel" && navigator.maxTouchPoints>1);
   const standalone = () => window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
   const supported = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
-  const key = () => "sr_push_" + G.code + "_" + G.pid;
+  const DEV = "sr_push_device";                       // this phone said yes to alerts (covers every game)
+  const done = new Set();                              // games already signed up this session
   function b64(s){ const p="=".repeat((4-s.length%4)%4); const r=atob((s+p).replace(/-/g,"+").replace(/_/g,"/")); return Uint8Array.from([...r].map(c=>c.charCodeAt(0))); }
+  async function subscription(){
+    const reg = await navigator.serviceWorker.register("sw.js");
+    await navigator.serviceWorker.ready;
+    return (await reg.pushManager.getSubscription()) || (await reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey:b64(CONFIG.VAPID_PUBLIC_KEY)}));
+  }
   return {
+    on(){ return ONLINE && supported() && Notification.permission==="granted" && localStorage.getItem(DEV)==="1"; },
     status(){
-      if (localStorage.getItem(key()) && "Notification" in window && Notification.permission==="granted") return "on";
+      if (!ONLINE) return "unsupported";
+      if (this.on()) return "on";
       if (supported()) return "off";
       if (isIOS && !standalone()) return "needs-install";
       return "unsupported";
     },
+    // Called whenever a game loads: once this phone allows alerts, every game it plays is signed up automatically.
+    async registerGame(code, pid){
+      if (!this.on() || !code || !pid) return;
+      const k = code + "|" + pid; if (done.has(k)) return; done.add(k);
+      try {
+        const sub = await subscription();
+        const {error} = await SB.from("rummy_push").insert({endpoint:sub.endpoint, game_code:code, player_id:pid, subscription:sub.toJSON()});
+        if (error && error.code !== "23505") { done.delete(k); console.warn("alert sign-up failed", error.message); }
+      } catch(e){ done.delete(k); console.warn("alert sign-up failed", e); }
+    },
     async enable(){
-      if (this.status()==="on") { toast("Alerts are on for this game ✅"); return; }
+      if (this.status()==="on") { showSettings("alerts"); return; }
       if (!supported()) {
         if (isIOS) return openModal(`<h2>📲 One quick step</h2>
           <p>iPhones only allow game alerts from apps on the home screen:</p>
           <ol style="line-height:1.6"><li>Tap the <b>Share</b> button (square with an arrow) in Safari.</li>
           <li>Tap <b>Add to Home Screen</b>, then <b>Add</b>.</li>
-          <li>Open <b>Rummy</b> from your home screen, tap <b>I'm …</b> to pick yourself, then tap the 🔕 bell at the top.</li></ol>
+          <li>Open <b>Rummy</b> from your home screen, pick your game, then tap <b>🔕 Alerts</b> at the top.</li></ol>
+          <p class="muted" style="color:#777">You only do this once — after that every game buzzes you automatically.</p>
           <button class="ghost" data-close style="width:100%">OK</button>`, "push");
         return toast("This browser can't show notifications", true);
       }
       try {
         const perm = await Notification.requestPermission();
         if (perm !== "granted") return toast("Notifications are turned off for this site in your phone's settings", true);
-        const reg = await navigator.serviceWorker.register("sw.js");
-        await navigator.serviceWorker.ready;
-        let sub = await reg.pushManager.getSubscription();
-        if (!sub) sub = await reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey:b64(CONFIG.VAPID_PUBLIC_KEY)});
-        // Plain insert (allowed by the table's security rule); "already saved" is fine.
-        const {error} = await SB.from("rummy_push").insert({endpoint:sub.endpoint, game_code:G.code, player_id:G.pid, subscription:sub.toJSON()});
-        if (error && error.code !== "23505") throw new Error(error.message);
-        localStorage.setItem(key(), "1");
-        Sound.play("chime"); toast("🔔 You'll get a buzz when it's your turn"); render();
+        await subscription();
+        localStorage.setItem(DEV, "1");
+        if (G.code && G.pid) await this.registerGame(G.code, G.pid);
+        Sound.play("chime"); toast("🔔 Alerts are on — for this game and every game after"); render();
       } catch(e){ toast("Couldn't turn on alerts: " + e.message, true); }
     }
   };
 })();
-if ("serviceWorker" in navigator && ONLINE) navigator.serviceWorker.register("sw.js").catch(()=>{});
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{});
 
 /* ======================= BOOT ======================= */
 async function openGame(code){
-  G.code = code.toUpperCase(); G.state = null; G.version = -1; G.sel.clear(); G.staged = []; G.pid = null;
-  G.be = makeBackend(G.code);
+  G.code = code.toUpperCase(); G.state = null; G.version = -1; G.sel.clear(); G.staged = []; G.pid = null; G.loadError = null;
+  try { G.be = makeBackend(G.code); } catch(e){ G.be = null; G.loadError = "offline"; render(); return; }
   render();
   try {
     const row = await G.be.get();
@@ -2244,11 +2464,13 @@ async function openGame(code){
     localStorage.setItem("sr_last", G.code);
     resolvePid(G.code, row.state);
     applyRemote(row);
-  } catch(e){ toast(e.message, true); }
+    Net.set(false);
+  } catch(e){ G.loadError = e.message || "offline"; if (ONLINE) Net.set(true); render(); }
   G.be.subscribe(row=>applyRemote(row));
 }
 applyPrefs();
 applyHoliday();
+if (Net.down || LIB_MISSING) setTimeout(()=>{ Net.down = true; Net.paint(); }, 1000);
 setTimeout(()=>{ const sp = $("#splash"); if (sp) { sp.classList.add("gone"); setTimeout(()=>sp.remove(), 600); } }, 950);
 History.load();
 const qs = new URLSearchParams(location.search).get("g");
