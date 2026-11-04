@@ -1230,7 +1230,7 @@ const Rivalry = {
     };
     const row = {id, pair:this.pairKey(s), winner, totals:Object.fromEntries(tot.map(x=>[x.n,x.t])), detail, finished_at:new Date().toISOString()};
     try {
-      if (ONLINE) { const {error} = await SB.from("rummy_results").upsert(row, {onConflict:"id", ignoreDuplicates:true}); if (error) return; }
+      if (ONLINE) { const {error} = await SB.from("rummy_results").insert(row); if (error && error.code !== "23505") return; }
       else { const all = JSON.parse(localStorage.getItem("sr_results")||"{}"); all[id] = row; localStorage.setItem("sr_results", JSON.stringify(all)); }
       localStorage.setItem("sr_rec_"+id, "1"); History.load(true);
     } catch(e){}
@@ -2222,8 +2222,9 @@ const Push = (()=>{
         await navigator.serviceWorker.ready;
         let sub = await reg.pushManager.getSubscription();
         if (!sub) sub = await reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey:b64(CONFIG.VAPID_PUBLIC_KEY)});
-        const {error} = await SB.from("rummy_push").upsert({endpoint:sub.endpoint, game_code:G.code, player_id:G.pid, subscription:sub.toJSON()}, {onConflict:"endpoint,game_code", ignoreDuplicates:true});
-        if (error) throw new Error(error.message);
+        // Plain insert (allowed by the table's security rule); "already saved" is fine.
+        const {error} = await SB.from("rummy_push").insert({endpoint:sub.endpoint, game_code:G.code, player_id:G.pid, subscription:sub.toJSON()});
+        if (error && error.code !== "23505") throw new Error(error.message);
         localStorage.setItem(key(), "1");
         Sound.play("chime"); toast("🔔 You'll get a buzz when it's your turn"); render();
       } catch(e){ toast("Couldn't turn on alerts: " + e.message, true); }
