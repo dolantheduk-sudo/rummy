@@ -290,6 +290,8 @@ button.ghost{-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
 .seg button{flex:1;background:none;box-shadow:none;color:#6b5a2a;text-shadow:none;padding:8px;font-size:14px;border-radius:10px}
 .seg button::after{display:none}
 .seg button.on{background:#fff;color:#222;box-shadow:0 1px 4px rgba(0,0,0,.15)}
+.seg.dark{background:rgba(0,0,0,.3);margin:0 0 12px}
+.seg.dark button{color:#f3e7c4}.seg.dark button.on{background:var(--goldgrad);color:#3a2600}
 /* skeleton */
 .skel{height:64px;border-radius:16px;margin:10px 0;background:linear-gradient(90deg,rgba(255,255,255,.06),rgba(255,255,255,.16),rgba(255,255,255,.06));background-size:200% 100%;animation:shimmer 1.2s linear infinite}
 .skel.tall{height:220px}
@@ -479,16 +481,18 @@ const SUITS = ["S","H","C","D"];
 const RANKS = ["A","2","3","4","5","6","7","8","9","T","J","Q","K"];
 const RV = {A:1,"2":2,"3":3,"4":4,"5":5,"6":6,"7":7,"8":8,"9":9,T:10,J:11,Q:12,K:13};
 const SYM = {S:"♠",H:"♥",D:"♦",C:"♣"};
+// rl = how long each run must be that round. Rounds 8–10 are only played in a Ten-Rounder.
 const CONTRACTS = [
-  {s:2,r:0,n:10},{s:1,r:1,n:11},{s:0,r:2,n:12},{s:3,r:0,n:13},
-  {s:2,r:1,n:14},{s:1,r:2,n:15},{s:0,r:3,n:16}
+  {s:2,r:0,n:10,rl:4},{s:1,r:1,n:11,rl:4},{s:0,r:2,n:12,rl:4},{s:3,r:0,n:13,rl:4},
+  {s:2,r:1,n:14,rl:4},{s:1,r:2,n:15,rl:4},{s:0,r:3,n:16,rl:4},
+  {s:1,r:1,n:17,rl:10},{s:3,r:1,n:18,rl:5},{s:0,r:3,n:19,rl:5}
 ];
-const ROUNDS = CONTRACTS.length;
+const roundsOf = s => (s && s.settings && s.settings.tenRounds) ? 10 : 7;
 
 function contractText(r){
   const k = CONTRACTS[r], p = [];
   if (k.s) p.push(k.s + (k.s>1?" sets":" set") + " of 3");
-  if (k.r) p.push(k.r + (k.r>1?" runs":" run") + " of 4");
+  if (k.r) p.push(k.r + (k.r>1?" runs":" run") + " of " + (k.rl||4));
   return p.join(" + ");
 }
 const isJoker = c => c[0]==="W";
@@ -541,8 +545,8 @@ function layoutRun(nat, wild){
   }
   return null;
 }
-function analyzeRun(cards,S){
-  if (cards.length < 4) return null;
+function analyzeRun(cards,S,minLen=4){
+  if (cards.length < minLen) return null;
   const jokers = cards.filter(isJoker);
   const others = cards.filter(c=>!isJoker(c));
   const twos = S.twosWild ? others.filter(c=>c[0]==="2") : [];
@@ -555,9 +559,10 @@ function analyzeRun(cards,S){
 function checkContract(groups, k, S){
   const need = k.s + k.r, ri = CONTRACTS.indexOf(k);
   if (groups.length !== need) return {ok:false, msg:`This round needs exactly ${need} groups: ${contractText(ri)}`};
-  const opts = groups.map(g=>({set:analyzeSet(g,S), run:analyzeRun(g,S)}));
+  const rl = k.rl || 4;
+  const opts = groups.map(g=>({set:analyzeSet(g,S), run:analyzeRun(g,S,rl)}));
   const bad = opts.findIndex(o=>!o.set && !o.run);
-  if (bad>=0) return {ok:false, msg:`Group ${bad+1} isn't a valid set (3+ same rank) or run (4+ in a row, same suit)`};
+  if (bad>=0) return {ok:false, msg:`Group ${bad+1} isn't a valid set (3+ same rank) or run (${rl}+ in a row, same suit)`};
   function rec(i,s,r,acc){
     if (i===groups.length) return (s===0 && r===0) ? acc : null;
     const o = opts[i];
@@ -574,17 +579,11 @@ function fitCard(m, c, S){
     if (isWild(c,S) || c[0]===m.rank) return {cards:[...m.cards, c]};
     return null;
   }
-  if (!isJoker(c) && c[1]===m.suit) {
-    const lowV = c[0]==="A" ? 1 : RV[c[0]];
-    const highV = c[0]==="A" ? 14 : RV[c[0]];
-    if (lowV === m.low-1) return {low:m.low-1, cards:[c, ...m.cards]};
-    if (highV === m.high+1) return {high:m.high+1, cards:[...m.cards, c]};
-  }
-  if (isWild(c,S)) {
-    if (m.high < 14) return {high:m.high+1, cards:[...m.cards, c]};
-    if (m.low > 1) return {low:m.low-1, cards:[c, ...m.cards]};
-  }
-  return null;
+  // Re-lay the whole run with the new card: real cards go where they belong and any wilds
+  // slide to whatever spots are left (e.g. 9-10-★-Q + J becomes 9-10-J-Q-★).
+  const L = analyzeRun([...m.cards, c], S, 1);
+  if (!L || L.suit !== m.suit) return null;
+  return {low:L.low, high:L.high, cards:L.cards};
 }
 function meldLabel(m){
   if (m.type==="set") return "Set of " + (m.rank==="T"?"10":m.rank) + "s";
@@ -629,7 +628,7 @@ function deal(s,r){
   s.discard = [deck.pop()]; s.stock = deck;
   s.down = {}; s.melds = []; s.nextMeld = 1;
   s.turn = (s.dealer + 1) % n; s.phase = "draw"; s.drawn = null;
-  s.status = "playing"; s.result = null; s.turnAt = Date.now(); s.undo = [];
+  s.status = "playing"; s.result = null; s.turnAt = Date.now(); s.undo = []; s.turnNo = 0; s.downAt = {};
   addLog(s, `Round ${r+1} dealt (${k} cards each) — ${contractText(r)}. ${s.players[s.turn].name} goes first.`, "deal");
 }
 function endRound(s,winner){
@@ -694,6 +693,7 @@ const Actions = {
     addLog(s, `${pname(s,pid)} nudged ${pname(s,to)} 👉`, "nudge", pid, null, {to});
     return s;
   },
+  setRounds(s,pid,ten){ need(s.status==="lobby" && s.hostId===pid, "Only the host can change settings"); s.settings.tenRounds = !!ten; return s; },
   setTwos(s,pid,on){ need(s.status==="lobby" && s.hostId===pid, "Only the host can change settings"); s.settings.twosWild = !!on; return s; },
   start(s,pid){
     if (s.status!=="lobby") return null;
@@ -731,13 +731,14 @@ const Actions = {
     need(res.ok, res.msg);
     takeFromHand(s,pid,flat);
     for (const m of res.melds) { m.id = s.nextMeld++; m.owner = pid; s.melds.push(m); }
-    s.down[pid] = true;
+    s.down[pid] = true; s.downAt = s.downAt || {}; s.downAt[pid] = s.turnNo||0;
     addLog(s, `${pname(s,pid)} laid down: ${res.melds.map(meldLabel).join(", ")}`, "lay", pid);
     checkOut(s,pid); return s;
   },
   layOff(s,pid,cards,meldId){
     myTurn(s,pid,"play");
     need(s.down[pid], "Lay down your contract before adding to melds");
+    need(!(s.downAt && s.downAt[pid]===(s.turnNo||0)), "You just laid down — you can add to melds starting next turn");
     const m = s.melds.find(x=>x.id===meldId); need(m, "That meld is gone");
     cards.forEach(c=>need(s.hands[pid].includes(c), "That card isn't in your hand"));
     const beforeMeld = JSON.stringify(m);
@@ -772,13 +773,13 @@ const Actions = {
     { const d = bump(s,pid).disc; d[c[0]] = (d[c[0]]||0) + 1; }
     addLog(s, `${pname(s,pid)} discarded ${cardName(c)}`, "discard", pid, c);
     if (!s.hands[pid].length) { endRound(s,pid); return s; }
-    s.turn = (s.turn+1) % s.players.length; s.phase = "draw"; s.drawn = null; s.undo = [];
+    s.turn = (s.turn+1) % s.players.length; s.phase = "draw"; s.drawn = null; s.undo = []; s.turnNo = (s.turnNo||0) + 1;
     s.turnAt = Date.now();
     return s;
   },
   nextRound(s,pid,fromRound){
     if (s.status!=="roundOver" || s.round!==fromRound) return null;
-    if (s.round >= ROUNDS-1) { s.status = "gameOver"; addLog(s,"Game over!","over"); }
+    if (s.round >= roundsOf(s)-1) { s.status = "gameOver"; addLog(s,"Game over!","over"); }
     else deal(s, s.round+1);
     return s;
   },
@@ -1317,7 +1318,7 @@ const Rivalry = {
       outs:   Object.fromEntries(s.players.map(p=>[key(p), (st[p.id]||{}).outs||0])),
       disc:   Object.fromEntries(s.players.map(p=>[key(p), (st[p.id]||{}).disc||{}])),
       picks:  Object.fromEntries(s.players.map(p=>[key(p), (st[p.id]||{}).picks||0])),
-      reason: s.endReason || "finished",
+      reason: s.endReason || "finished", rounds: roundsOf(s),
       conceded: s.concededBy ? key(s.players.find(p=>p.id===s.concededBy)||{name:""}) : null,
     };
     const row = {id, pair:this.pairKey(s), winner, totals:Object.fromEntries(tot.map(x=>[x.n,x.t])), detail, finished_at:new Date().toISOString()};
@@ -1927,17 +1928,23 @@ function renderLobby(app,s){
       ${s.players.length>=2 ? Rivalry.html(s) : ""}
     </div>
     <div class="panel">
+      <div class="muted" style="margin-bottom:6px">Game length</div>
+      <div class="seg dark" id="rounds">
+        <button data-r="7" class="${!s.settings.tenRounds?"on":""}" ${host?"":"disabled"}>Classic · 7 rounds</button>
+        <button data-r="10" class="${s.settings.tenRounds?"on":""}" ${host?"":"disabled"}>Ten-Rounder · 10</button>
+      </div>
       <label class="row"><input type="checkbox" id="twos" ${s.settings.twosWild?"checked":""} ${host?"":"disabled"} style="width:22px;height:22px"> <span>2s are wild too (jokers are always wild)</span></label>
     </div>
     ${ONLINE && Push.status()!=="unsupported" ? `<div class="panel row"><div style="flex:1" class="muted">Get a buzz on your phone when it's your turn</div>${pushButtonHTML()}</div>` : ""}
     ${host ? `<button id="start" style="width:100%" ${s.players.length<2?"disabled":'class="cta"'}>🎰 Deal the cards</button>` : `<div class="status">Waiting for ${esc(pname(s,s.hostId))} to deal…</div>`}
-    <div class="center" style="margin-top:12px"><button class="ghost small" id="rules">How to play</button> <button class="ghost small" id="statsb">📊 Stats</button> ${chatButtonHTML(s)}</div>`;
+    <div class="center" style="margin-top:12px"><button class="ghost small" id="rules">How to play</button> <button class="ghost small" id="statsb">📊 Stats</button> <button class="ghost small" id="chatb" style="position:relative;overflow:visible">💬 Chat${unread(s)?`<span class="badge">${unread(s)}</span>`:""}</button></div>`;
   $("#share").onclick = async ()=>{
     const url = shareURL();
     if (navigator.share) { try { await navigator.share({title:"Shanghai Rummy", text:"Come play Shanghai Rummy with me!", url}); return; } catch(e){ if (e.name==="AbortError") return; } }
     try { await navigator.clipboard.writeText(url); toast("Link copied — paste it in a text"); } catch(e){ toast("Copy the link shown below"); }
   };
   const tw = $("#twos"); if (host) tw.onchange = ()=>act("setTwos", tw.checked);
+  if (host) document.querySelectorAll("#rounds [data-r]").forEach(b=>b.onclick=()=>act("setRounds", b.dataset.r==="10"));
   if (host) $("#start").onclick = ()=>act("start");
   $("#rules").onclick = showRules;
   $("#setb").onclick = showSettings;
@@ -1956,7 +1963,8 @@ function renderGame(app,s){
   const {cards:shown, starts} = orderHand(hand.filter(c=>!stagedSet.has(c)));
   const total = pid => (s.scores[pid]||[]).reduce((a,b)=>a+b,0);
   const canDraw = mine && s.phase==="draw";
-  const canLayOff = mine && s.phase==="play" && down && G.sel.size>0;
+  const justDown = down && s.downAt && s.downAt[me]===(s.turnNo||0);
+  const canLayOff = mine && s.phase==="play" && down && !justDown && G.sel.size>0;
   const k = CONTRACTS[s.round];
   const prevMeldIds = new Set([...document.querySelectorAll("[data-meld]")].map(e=>+e.dataset.meld));
   const myLastNudge = [...s.log].reverse().find(e=>e.k==="nudge" && e.p===me);
@@ -1967,6 +1975,7 @@ function renderGame(app,s){
   else if (!mine) status = `${Presence.get(turnPid).online && Presence.get(turnPid).active ? "🤔 "+esc(pname(s,turnPid))+" is thinking…" : "Waiting for "+esc(pname(s,turnPid))+"…"}${s.turnAt?` <span class="turnt" style="font-weight:600">(${since(s.turnAt)})</span>`:""} <button class="small" id="nudge" ${nudgeWait?"disabled":""} style="margin-left:6px">👉 ${nudgeWait?`Nudge in ${nudgeWait}m`:"Nudge"}</button>`;
   else if (s.phase==="draw") status = "Your turn! Tap the deck or the discard pile.";
   else if (!down) status = "Make your groups and lay down if you can — then discard.";
+  else if (justDown) status = "Nice! You're down. Discard to finish your turn — you can add to melds next turn.";
   else status = "Add cards to any meld (select, then tap it) — then discard.";
 
   const lastOther = [...s.log].reverse().find(l=>l.p && l.p!==me) || [...s.log].reverse()[0];
@@ -1997,7 +2006,7 @@ function renderGame(app,s){
   if (!down && G.staged.length) {
     const res = G.staged.length===k.s+k.r ? checkContract(G.staged,k,S) : null;
     stage = `<div class="panel stage"><b>Your groups</b> <span class="muted">(${G.staged.length} of ${k.s+k.r})</span>
-      ${G.staged.map((g,i)=>{ const st=analyzeSet(g,S), rn=analyzeRun(g,S);
+      ${G.staged.map((g,i)=>{ const st=analyzeSet(g,S), rn=analyzeRun(g,S,k.rl||4);
         const ok = st||rn ? `<span class="ok">${[st?"set":null,rn?"run":null].filter(Boolean).join(" / ")} ✓</span>` : `<span class="bad">not valid</span>`;
         return `<div class="grp"><div class="cards">${g.map(c=>cardHTML(c,"mini")).join("")}</div>${ok}<button class="ghost small" data-unstage="${i}">✕</button></div>`; }).join("")}
       ${res && !res.ok ? `<div class="bad">${esc(res.msg)}</div>`:""}
@@ -2016,7 +2025,7 @@ function renderGame(app,s){
 
   app.innerHTML = `
     <div class="top">
-      <div class="info"><div class="rnd goldtext">ROUND ${s.round+1} OF ${ROUNDS}${HOLIDAY?` <span class="holtag">${esc(HOLIDAY.name)}</span>`:""}</div><div class="contract">${contractText(s.round)}</div></div>
+      <div class="info"><div class="rnd goldtext">ROUND ${s.round+1} OF ${roundsOf(s)}${HOLIDAY?` <span class="holtag">${esc(HOLIDAY.name)}</span>`:""}</div><div class="contract">${contractText(s.round)}</div></div>
       ${pushButtonHTML()}
       ${chatButtonHTML(s)}
       ${tb("scores","📊","Scores")}
@@ -2044,7 +2053,7 @@ function renderGame(app,s){
     <div class="hand" id="hand">${shown.map(c=>cardHTML(c,"",(G.sel.has(c)?"sel ":"")+(starts.has(c)?"gstart ":"")+(s.drawn&&s.drawn.pid===me&&s.drawn.c===c&&mine?"new":""))).join("")}</div>
     <div class="muted center" style="font-size:12px;margin-top:-2px">Tap to select · hold & drag to move a card</div>
     ${buttons.length?`<div class="actions dock">${buttons.join("")}</div>`:""}
-    ${mine&&s.phase==="play"&&down&&!G.sel.size?`<div class="muted center">Tip: select a card, then tap a meld to add it.</div>`:""}
+    ${mine&&s.phase==="play"&&down&&!justDown&&!G.sel.size?`<div class="muted center">Tip: select a card, then tap a meld to add it.</div>`:""}
   `;
   animateTable(before);
   setupDrag($("#hand"));
@@ -2070,7 +2079,7 @@ function renderGame(app,s){
   const cs = $("#clearstage"); if (cs) cs.onclick = ()=>{ G.staged=[]; render(); };
   const ld = $("#laydown"); if (ld) ld.onclick = async ()=>{ const g = G.staged; if (await act("layDown", g)) G.staged=[]; else ld.closest(".stage")?.classList.add("shake"); };
   app.querySelectorAll("[data-meld]").forEach(el=>el.onclick=async ()=>{
-    if (!canLayOff) { if (mine && s.phase==="play" && !down) toast("Lay down your contract first", true); else if (mine && s.phase==="play") toast("Select a card from your hand first", true); return; }
+    if (!canLayOff) { if (mine && s.phase==="play" && !down) toast("Lay down your contract first", true); else if (mine && s.phase==="play" && justDown) toast("You just laid down — you can add to melds starting next turn", true); else if (mine && s.phase==="play") toast("Select a card from your hand first", true); return; }
     const cards = [...G.sel];
     if (!(await act("layOff", cards, +el.dataset.meld))) { el.classList.remove("shake"); void el.offsetWidth; el.classList.add("shake"); }
   });
@@ -2098,7 +2107,7 @@ function closeModal(animated){
 }
 function scoreTable(s){
   const rows = [];
-  for (let r=0; r<ROUNDS; r++) {
+  for (let r=0; r<roundsOf(s); r++) {
     if (!s.players.some(p=>(s.scores[p.id]||[])[r]!==undefined)) continue;
     rows.push(`<tr><td>${r+1}. ${contractText(r)}</td>${s.players.map(p=>`<td>${s.scores[p.id][r]}</td>`).join("")}</tr>`);
   }
@@ -2158,7 +2167,7 @@ function showResult(s){
     <div class="cards">${r.hands[p.id].map(c=>cardHTML(c,"mini")).join("")}</div></div>`).join("");
   const btn = over
     ? `<button id="again" class="cta" style="width:100%">🎰 Play again</button>`
-    : s.round >= ROUNDS-1
+    : s.round >= roundsOf(s)-1
       ? `<button id="next" class="cta" style="width:100%">🏆 See the final results</button>`
       : `<button id="next" class="cta" style="width:100%">Deal round ${s.round+2}: ${contractText(s.round+1)} (${CONTRACTS[s.round+1].n} cards)</button>`;
   openModal(`<h2>${over?(conceded?"Game conceded":"Game over"):"Round "+(s.round+1)+" finished"}</h2>${head}${hands}${over?rivalryBox(s):""}<h3>Scores</h3>${scoreTable(s)}${btn}
@@ -2382,14 +2391,14 @@ function showSettings(section){
 function showRules(){
   openModal(`<h2>How to play</h2>
   <ul>
-    <li><b>Goal:</b> lowest score after 7 rounds.</li>
+    <li><b>Goal:</b> lowest score after 7 rounds (Classic) or 10 rounds (Ten-Rounder) — the host picks in the lobby.</li>
     <li>Each round deals one more card, starting at 10, and has a <b>contract</b> you must lay down first:<br>
-      ${CONTRACTS.map((k,i)=>`${i+1}. ${contractText(i)} (${k.n} cards)`).join("<br>")}</li>
+      ${CONTRACTS.map((k,i)=>`${i+1}. ${contractText(i)} (${k.n} cards)${i>=7?" — Ten-Rounder only":""}`).join("<br>")}</li>
     <li><b>Set</b> = 3 or more of the same number (any suits). <b>Run</b> = 4 or more in a row, all the same suit. Ace can be low (A-2-3-4) or high (J-Q-K-A).</li>
     <li><b>Jokers are wild</b> (and 2s too, if the host turned that on).</li>
     <li><b>Your turn:</b> draw from the deck or take the top discard → lay down / add cards → discard one card.</li>
     <li>To lay down: tap cards to select them, tap <b>Make group</b> for each group, then <b>Lay down</b>.</li>
-    <li>After you're down, you can add cards to anyone's melds: select a card, then tap the meld.</li>
+    <li>Starting the turn <b>after</b> you lay down, you can add cards to anyone's melds: select a card, then tap the meld. Wild cards in a run slide over to make room for real cards.</li>
     <li><b>Your hand:</b> the sort button switches between ✨ Smart (groups cards that go together), suit and number. Hold a card and drag it to put it anywhere.</li>
     <li>First to get rid of every card wins the round. Everyone else scores what's left: 2–9 = 5, 10–K = 10, Ace = 15, Joker = 50${G.state&&G.state.settings&&G.state.settings.twosWild?", wild 2 = 20":""}.</li>
     <li>💬 opens the chat and stickers. 👉 Nudge pokes the other player. 🔕 turns on phone alerts.</li>
