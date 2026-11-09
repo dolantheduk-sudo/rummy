@@ -1521,7 +1521,7 @@ function flipFrom(el, from, {dur=480, delay=0, rot=0, fadeIn=false}={}){
     {transform:`translate(${dx}px,${dy}px) scale(${sx},${sy}) rotate(${rot}deg)`, opacity:1, offset:.01},
     {transform:"none", opacity:1}
   ], {duration:dur, delay, easing:"cubic-bezier(.2,.75,.25,1)", fill:"backwards"});
-  a.onfinish = ()=>{ el.style.zIndex=""; el.style.transformOrigin=""; };
+  a.onfinish = a.oncancel = ()=>{ el.style.zIndex=""; el.style.transformOrigin=""; };
 }
 function flyGhost(card, from, to, {dur=520, delay=0, cls="big"}={}){
   if (!from || !to) return;
@@ -1532,7 +1532,8 @@ function flyGhost(card, from, to, {dur=520, delay=0, cls="big"}={}){
   const sx = to.w/from.w, sy = to.h/from.h;
   const a = el.animate([{transform:"none",opacity:1},{transform:`translate(${to.x+to.w/2-from.x-from.w/2}px,${to.y+to.h/2-from.y-from.h/2}px) scale(${Math.min(sx,sy)}) rotate(8deg)`,opacity:.9}],
     {duration:dur, delay, easing:"cubic-bezier(.3,.6,.3,1)", fill:"both"});
-  a.onfinish = ()=>el.remove();
+  a.onfinish = a.oncancel = ()=>el.remove();
+  setTimeout(()=>el.remove(), dur + delay + 1500);
 }
 function animateTable(before){
   const s = G.state, me = G.pid;
@@ -1671,7 +1672,8 @@ function setupDrag(container){
   container.querySelectorAll(".card").forEach(el=>{
     el.addEventListener("pointerdown", e=>{
       if (e.button>0) return;
-      D = {el, container, x0:e.clientX, y0:e.clientY, x:e.clientX, y:e.clientY, active:false, ghost:null, target:null, after:false};
+      if (D) { if (D.active) return; cancelDrag(); }        // a second finger never starts a second drag
+      D = {el, container, id:e.pointerId, x0:e.clientX, y0:e.clientY, x:e.clientX, y:e.clientY, active:false, ghost:null, target:null, after:false};
       D.timer = setTimeout(()=>{ if (D && !D.active) activateDrag(); }, 300);
     });
   });
@@ -1706,8 +1708,9 @@ function moveDrag(x,y){
   D.target = best;
   if (best) best.c.classList.add(best.after?"ins-after":"ins-before");
 }
-function endDrag(){
+function endDrag(e){
   if (!D) return;
+  if (e && e.pointerId !== undefined && D.id !== undefined && e.pointerId !== D.id) return;   // ignore other fingers
   clearTimeout(D.timer);
   if (D.active) {
     G.suppressClick = true; setTimeout(()=>G.suppressClick=false, 350);
@@ -1725,17 +1728,20 @@ function endDrag(){
   const was = D.active; cancelDrag();
   if (was) render();
 }
+// Always sweeps the whole page, so a floating copy can never be left behind.
 function cancelDrag(){
-  if (!D) return;
-  clearTimeout(D.timer);
-  if (D.ghost) D.ghost.remove();
-  if (D.el) D.el.classList.remove("dragging");
-  if (D.container) D.container.querySelectorAll(".ins-before,.ins-after").forEach(c=>c.classList.remove("ins-before","ins-after"));
+  if (D) clearTimeout(D.timer);
   D = null;
+  document.querySelectorAll(".dragghost").forEach(g=>g.remove());
+  document.querySelectorAll(".hand .card.dragging").forEach(c=>c.classList.remove("dragging"));
+  document.querySelectorAll(".ins-before,.ins-after").forEach(c=>c.classList.remove("ins-before","ins-after"));
 }
-window.addEventListener("pointermove", e=>{ if (D) moveDrag(e.clientX, e.clientY); });
+window.addEventListener("pointermove", e=>{ if (D && (D.id===undefined || e.pointerId===D.id)) moveDrag(e.clientX, e.clientY); });
 window.addEventListener("pointerup", endDrag);
-window.addEventListener("pointercancel", ()=>{ if (D && !D.active) cancelDrag(); });
+// The phone took the gesture away (notification, edge swipe, app switch): drop the drag cleanly.
+window.addEventListener("pointercancel", e=>{ if (D && (D.id===undefined || e.pointerId===D.id)) cancelDrag(); });
+window.addEventListener("blur", cancelDrag);
+document.addEventListener("visibilitychange", ()=>{ if (document.hidden) cancelDrag(); });
 document.addEventListener("touchmove", e=>{ if (D && D.active) e.preventDefault(); }, {passive:false});
 
 function shareURL(){ const u = new URL(location.href); u.search = "?g=" + G.code; u.hash = ""; return u.toString(); }
@@ -1762,7 +1768,7 @@ function render(){
 }
 function renderScreen(){
   const app = $("#app");
-  if (D) cancelDrag();
+  if (D || document.querySelector(".dragghost")) cancelDrag();
   if (!G.code) return renderHome(app);
   const s = G.state;
   if (!s && G.loadError) {
